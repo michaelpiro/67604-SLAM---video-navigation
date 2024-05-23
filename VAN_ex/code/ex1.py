@@ -7,7 +7,7 @@ NUM_FEATURES_TO_SHOW = 20
 MAX_FEATURES = 501
 BAD_RATIO = 1
 GOOD_RATIO = 0.6
-MAC = True
+MAC = False
 if MAC:
     DATA_PATH = 'VAN_ex/dataset/sequences/00'
 else:
@@ -123,7 +123,7 @@ def q1(idx):
     plt.imshow(passed_ratio_t_img)
     plt.title('The Matches that passed the ratio test')
 
-    """draw the matches that failed the ratio test from the random 20 matches (just to demonstrate)"""
+    """draw the matches that failed the ratio test from the random 20 matches"""
     failed_ratio_t_img = cv2.drawMatchesKnn(img_left, kp_left, img_right, kp_right, matches_knn2,
                                             outImg=None,
                                             matchColor=(255, 0, 0),
