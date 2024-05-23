@@ -3,16 +3,16 @@ import random
 import matplotlib.pyplot as plt
 import os
 
-
 NUM_FEATURES_TO_SHOW = 20
 MAX_FEATURES = 501
 BAD_RATIO = 1
-GOOD_RATIO = 0.4
+GOOD_RATIO = 0.6
 MAC = True
 if MAC:
     DATA_PATH = 'VAN_ex/dataset/sequences/00'
 else:
     DATA_PATH = r'...\VAN_ex\dataset\sequences\00\\'
+
 
 def read_images(idx):
     img_name = '{:06d}.png'.format(idx)
@@ -31,119 +31,115 @@ def q1(idx):
     kp_left, desc_left = feature.detectAndCompute(img_left, None)
     kp_right, desc_right = feature.detectAndCompute(img_right, None)
 
-    # draw keypoints on images
-    kp_left_image = cv2.drawKeypoints(img_left, kp_left, 0, (0, 255, 0),
-                                 flags=cv2.DRAW_MATCHES_FLAGS_DEFAULT,)
+    """draw keypoints on images"""
+    kp_left_image = cv2.drawKeypoints(image=img_left,
+                                      keypoints=kp_left,
+                                      outImage=None,
+                                      color=(0, 255, 0),
+                                      flags=cv2.DRAW_MATCHES_FLAGS_DEFAULT)
 
-    kp_right_image = cv2.drawKeypoints(img_right, kp_right, 0, (0, 255, 0),
-                                 flags=cv2.DRAW_MATCHES_FLAGS_DEFAULT)
+    kp_right_image = cv2.drawKeypoints(image=img_right,
+                                       keypoints=kp_right,
+                                       outImage=None,
+                                       color=(0, 255, 0),
+                                       flags=cv2.DRAW_MATCHES_FLAGS_DEFAULT)
 
-    # show images
-
+    """ show images """
     plt.figure()
     plt.subplot(2, 1, 1)
     plt.imshow(kp_left_image)
-    plt.title('Left Image')
+    plt.title('Left Image Key Points')
 
     plt.subplot(2, 1, 2)
     plt.imshow(kp_right_image)
-    plt.title('Right Image')
-    plt.show()
+    plt.title('Right Image Key Points')
 
+    """printing the descriptors of the first 2 features"""
+    print(f"Descriptor of the first feature in the left image:\n {desc_left[0]}")
+    print(f"Descriptor of the second feature in the left image:\n {desc_left[1]}")
 
-    # match keypoints
+    """ match the key points """
     matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
     matches_knn2 = matcher.knnMatch(desc_left, desc_right, k=2)
 
-    matches_mask_1 = [[0,0] for i in range(len(matches_knn2))]
-    matches_mask_2 = [[0, 0] for i in range(len(matches_knn2))]
-    failed_indices = [0 for i in range(len(matches_knn2))]
+    """creating masks for drawing matches"""
+    total_matches = len(matches_knn2)
+    mask_for_rand = [[0, 0]] * total_matches
+    # mask_for_rand = [[0, 0] for i in range(len(matches_knn2))]
+    mask_for_ratio_test = [[0, 0]] * total_matches
+    # mask_for_ratio_test = [[0, 0] for i in range(len(matches_knn2))]
+    mask_discarded = [[0, 0]] * total_matches
+    # mask_discarded = [[0, 0] for i in range(len(matches_knn2))]
 
-    # find good matches
+    """
+    apply ratio test to find bad matches, 
+    keep the indices of bad matches in failed_indices
+    and use it afterwards to create masks and show the matches that discarded
+    """
+    # failed_indices = [0 for i in range(len(matches_knn2))]
+    failed_indices = [0] * total_matches
     for i, (m, n) in enumerate(matches_knn2):
-        if m.distance < GOOD_RATIO * n.distance:
+        if m.distance > GOOD_RATIO * n.distance:
             failed_indices[i] = 1
 
-    # print(sum(failed_indices))
-    # select random 20 matches
-    random_matches_1 = random.sample(range(len(matches_mask_1)), NUM_FEATURES_TO_SHOW)
-    for i in random_matches_1:
-        matches_mask_1[i] = [1, 0]
+    """
+    generate random indices to show some of the matches in the image, then check if the match is good or bad
+    and use it to create masks for drawing matches
+    """
+    random_matches_idx = random.sample(range(len(mask_for_rand)), NUM_FEATURES_TO_SHOW)
+    for i in random_matches_idx:
+        mask_for_rand[i] = [1, 0]
         if failed_indices[i] == 0:
-            matches_mask_2[i] = [1, 0]
+            mask_for_ratio_test[i] = [1, 0]
+        else:
+            mask_discarded[i] = [1, 0]
+    """
+    compute and print the number of good matches, discarded matches and total matches
+    """
 
-
-    total_matches = len(matches_knn2)
-    good_matches_count = total_matches - sum(failed_indices)
     discarded_matches_count = sum(failed_indices)
-
+    good_matches_count = total_matches - discarded_matches_count
     print(f"Ratio value used: {GOOD_RATIO}")
     print(f"Total matches: {total_matches}")
     print(f"Good matches: {good_matches_count}")
     print(f"Discarded matches: {discarded_matches_count}")
 
+    """draw the random 20 matches without ratio test"""
+    plt.figure()
+    plt.subplot(3, 1, 1)
+    rand_20_img = cv2.drawMatchesKnn(img_left, kp_left, img_right, kp_right, matches_knn2,
+                                     outImg=None,
+                                     matchColor=(255, 0, 0),
+                                     singlePointColor=(0, 255, 0),
+                                     matchesMask=mask_for_rand,
+                                     flags=0)
+    plt.imshow(rand_20_img)
+    plt.title('20 Random matches without ratio test')
 
-    #draw naive matches
-    matches_img_knn1 = cv2.drawMatchesKnn(
-                                        img_left, kp_left, img_right, kp_right, matches_knn2,
-                                        outImg=None,
-                                        matchColor=(0, 255, 0),
-                                        singlePointColor=(255, 0, 0),
-                                        matchesMask=matches_mask_1,
-                                        flags=0)
-    plt.imshow(matches_img_knn1)
-    plt.title('Matches of knn1')
+    """draw only the matches that passed the ratio test from the random 20 matches"""
+    passed_ratio_t_img = cv2.drawMatchesKnn(img_left, kp_left, img_right, kp_right, matches_knn2,
+                                            outImg=None,
+                                            matchColor=(255, 0, 0),
+                                            singlePointColor=(0, 255, 0),
+                                            matchesMask=mask_for_ratio_test,
+                                            flags=0)
+    plt.subplot(3, 1, 2)
+    plt.imshow(passed_ratio_t_img)
+    plt.title('The Matches that passed the ratio test')
+
+    """draw the matches that failed the ratio test from the random 20 matches"""
+    failed_ratio_t_img = cv2.drawMatchesKnn(img_left, kp_left, img_right, kp_right, matches_knn2,
+                                            outImg=None,
+                                            matchColor=(255, 0, 0),
+                                            singlePointColor=(0, 255, 0),
+                                            matchesMask=mask_discarded,
+                                            flags=0)
+    plt.subplot(3, 1, 3)
+    plt.imshow(failed_ratio_t_img)
+    plt.title('The Matches that discarded by the ratio test')
+
     plt.show()
 
-    matches_img_knn2 = cv2.drawMatchesKnn(
-                                        img_left, kp_left, img_right, kp_right, matches_knn2,
-                                        outImg=None,
-                                        matchColor=(0, 255, 0),
-                                        singlePointColor=(255, 0, 0),
-                                        matchesMask=matches_mask_1,
-                                        flags=0)
-    plt.imshow(matches_img_knn2)
-    plt.title('Matches of knn2')
-    plt.show()
 
-    # #draw matches_of_knn1
-    # matches_img_knn1 = cv2.drawMatches(img_left, kp_left, img_right, kp_right, matches_knn1, outImg=None, matchColor=(0, 155, 0),
-    #                                     singlePointColor=(0, 255, 255), matchesMask=random_matches, flags=0)
-    # cv2.imshow('Matches', matches_img_knn1)
-    #
-    #
-    #
-    #         #draw matches_of_knn2
-    # # matches_img_knn2 = cv2.drawMatches(img_left, kp_left, img_right, kp_right, matches_knn2, outImg=None, matchColor=(0, 155, 0),
-    # #                                     singlePointColor=(0, 255, 255), matchesMask=random_matches, flags=0)
-    # cv2.imshow('Matches', matches_img_knn2)
-
-
-
-
-
-
-
-# def detect_extract_keyPoints(idx):
-#     img_left, img_right = read_images(idx)
-#     # kp_left = feature.detect(img1)
-#     # kp_right = feature.detect(img2)
-#     kp_left,desc_left = feature.detectAndCompute(img_left, None)
-#     kp_right,desc_right = feature.detectAndCompute(img_right, None)
-#     kp_left_image = cv2.drawKeypoints(img_left, kp_left, None, color=(0, 255, 0), flags=0)
-#     kp_right_image = cv2.drawKeypoints(img_right, kp_right, None, color=(0, 255, 0), flags=0)
-#
-#     # cv2.imshow('ORB', kp_image)
-#     return kp_left, kp_right
-#
-# def extract_descriptors(kp_left, kp_right, idx):
-#     img_left, img_right = read_images(idx)
-#     kp_left, des_left = feature.compute(img_left, kp_left)
-#     kp_right, des_right = feature.compute(img_right, kp_right)
-#
-#
-#
-#     return kp, des
 if __name__ == '__main__':
     q1(0)
-
