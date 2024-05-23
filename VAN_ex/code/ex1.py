@@ -65,18 +65,14 @@ def q1(idx):
     """creating masks for drawing matches"""
     total_matches = len(matches_knn2)
     mask_for_rand = [[0, 0]] * total_matches
-    # mask_for_rand = [[0, 0] for i in range(len(matches_knn2))]
     mask_for_ratio_test = [[0, 0]] * total_matches
-    # mask_for_ratio_test = [[0, 0] for i in range(len(matches_knn2))]
     mask_discarded = [[0, 0]] * total_matches
-    # mask_discarded = [[0, 0] for i in range(len(matches_knn2))]
 
     """
     apply ratio test to find bad matches, 
     keep the indices of bad matches in failed_indices
     and use it afterwards to create masks and show the matches that discarded
     """
-    # failed_indices = [0 for i in range(len(matches_knn2))]
     failed_indices = [0] * total_matches
     for i, (m, n) in enumerate(matches_knn2):
         if m.distance > GOOD_RATIO * n.distance:
