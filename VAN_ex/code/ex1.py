@@ -44,7 +44,7 @@ def q1(idx):
                                        color=(0, 255, 0),
                                        flags=cv2.DRAW_MATCHES_FLAGS_DEFAULT)
 
-    """ show images """
+    """ show images with keypoints (question 1.1)"""
     plt.figure()
     plt.subplot(2, 1, 1)
     plt.imshow(kp_left_image)
@@ -54,11 +54,11 @@ def q1(idx):
     plt.imshow(kp_right_image)
     plt.title('Right Image Key Points')
 
-    """printing the descriptors of the first 2 features"""
+    """printing the descriptors of the first 2 features (question 1.2)"""
     print(f"Descriptor of the first feature in the left image:\n {desc_left[0]}")
     print(f"Descriptor of the second feature in the left image:\n {desc_left[1]}")
 
-    """ match the key points """
+    """ match the key points and draw the matches (question 1.3)"""
     matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
     matches_knn2 = matcher.knnMatch(desc_left, desc_right, k=2)
 
@@ -69,7 +69,7 @@ def q1(idx):
     mask_discarded = [[0, 0]] * total_matches
 
     """
-    apply ratio test to find bad matches, 
+    apply ratio test to find bad matches (for question 1.4), 
     keep the indices of bad matches in failed_indices
     and use it afterwards to create masks and show the matches that discarded
     """
@@ -112,7 +112,7 @@ def q1(idx):
     plt.imshow(rand_20_img)
     plt.title('20 Random matches without ratio test')
 
-    """draw only the matches that passed the ratio test from the random 20 matches"""
+    """draw only the matches that passed the ratio test from the random 20 matches (question 1.4)"""
     passed_ratio_t_img = cv2.drawMatchesKnn(img_left, kp_left, img_right, kp_right, matches_knn2,
                                             outImg=None,
                                             matchColor=(255, 0, 0),
@@ -123,7 +123,7 @@ def q1(idx):
     plt.imshow(passed_ratio_t_img)
     plt.title('The Matches that passed the ratio test')
 
-    """draw the matches that failed the ratio test from the random 20 matches"""
+    """draw the matches that failed the ratio test from the random 20 matches (just to demonstrate)"""
     failed_ratio_t_img = cv2.drawMatchesKnn(img_left, kp_left, img_right, kp_right, matches_knn2,
                                             outImg=None,
                                             matchColor=(255, 0, 0),
