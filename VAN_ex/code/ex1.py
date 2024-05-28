@@ -7,7 +7,7 @@ NUM_FEATURES_TO_SHOW = 20
 MAX_FEATURES = 501
 BAD_RATIO = 1
 GOOD_RATIO = 0.6
-MAC = False
+MAC = True
 if MAC:
     DATA_PATH = 'VAN_ex/dataset/sequences/00'
 else:
@@ -65,35 +65,51 @@ def q1(idx):
     """creating masks for drawing matches"""
     total_matches = len(matches_knn2)
     mask_for_rand = [[0, 0]] * total_matches
-    mask_for_ratio_test = [[0, 0]] * total_matches
-    mask_discarded = [[0, 0]] * total_matches
+
+
+    # mask_discarded = [[0, 0]] * total_matches
 
     """
     apply ratio test to find bad matches (for question 1.4), 
     keep the indices of bad matches in failed_indices
     and use it afterwards to create masks and show the matches that discarded
     """
-    failed_indices = [0] * total_matches
+    # failed_indices = [0] * total_matches
+    good_matches = []
+    bad_matches = []
     for i, (m, n) in enumerate(matches_knn2):
-        if m.distance > GOOD_RATIO * n.distance:
-            failed_indices[i] = 1
-
+        if m.distance < GOOD_RATIO * n.distance:
+            good_matches.append([m])
+            # failed_indices[i] = 1
+        else:
+            bad_matches.append([m])
+    mask_for_ratio_test = [[0, 0]] * len(good_matches)
+    mask_for_discarded = [[0, 0]] * len(bad_matches)
     """
     generate random indices to show some of the matches in the image, then check if the match is good or bad
     and use it to create masks for drawing matches
     """
     random_matches_idx = random.sample(range(len(mask_for_rand)), NUM_FEATURES_TO_SHOW)
+    random_good_idx = random.sample(range(len(good_matches)), NUM_FEATURES_TO_SHOW)
+    random_bad_idx = random.sample(range(len(good_matches)), 5)
+
     for i in random_matches_idx:
         mask_for_rand[i] = [1, 0]
-        if failed_indices[i] == 0:
-            mask_for_ratio_test[i] = [1, 0]
-        else:
-            mask_discarded[i] = [1, 0]
+    for i in random_good_idx:
+        mask_for_ratio_test[i] = [1, 0]
+    for i in random_bad_idx:
+        mask_for_discarded[i] = [1, 0]
+
+
+        # if failed_indices[i] == 0:
+        #     mask_for_ratio_test[i] = [1, 0]
+        # else:
+        #     mask_discarded[i] = [1, 0]
     """
     compute and print the number of good matches, discarded matches and total matches
     """
-
-    discarded_matches_count = sum(failed_indices)
+    # discarded_matches_count = sum(failed_indices)
+    discarded_matches_count = total_matches - len(good_matches)
     good_matches_count = total_matches - discarded_matches_count
     print(f"Ratio value used: {GOOD_RATIO}")
     print(f"Total matches: {total_matches}")
@@ -102,35 +118,36 @@ def q1(idx):
 
     """draw the random 20 matches without ratio test"""
     plt.figure()
-    plt.subplot(3, 1, 1)
+    plt.subplot(2, 1, 1)
     rand_20_img = cv2.drawMatchesKnn(img_left, kp_left, img_right, kp_right, matches_knn2,
                                      outImg=None,
                                      matchColor=(255, 0, 0),
                                      singlePointColor=(0, 255, 0),
                                      matchesMask=mask_for_rand,
-                                     flags=0)
+                                     flags=cv2.DRAW_MATCHES_FLAGS_NOT_DRAW_SINGLE_POINTS)
     plt.imshow(rand_20_img)
     plt.title('20 Random matches without ratio test')
 
     """draw only the matches that passed the ratio test from the random 20 matches (question 1.4)"""
-    passed_ratio_t_img = cv2.drawMatchesKnn(img_left, kp_left, img_right, kp_right, matches_knn2,
+    passed_ratio_t_img = cv2.drawMatchesKnn(img_left, kp_left, img_right, kp_right, good_matches,
                                             outImg=None,
                                             matchColor=(255, 0, 0),
                                             singlePointColor=(0, 255, 0),
                                             matchesMask=mask_for_ratio_test,
-                                            flags=0)
-    plt.subplot(3, 1, 2)
+                                            flags=cv2.DRAW_MATCHES_FLAGS_NOT_DRAW_SINGLE_POINTS)
+    plt.subplot(2, 1, 2)
     plt.imshow(passed_ratio_t_img)
     plt.title('The Matches that passed the ratio test')
 
     """draw the matches that failed the ratio test from the random 20 matches"""
-    failed_ratio_t_img = cv2.drawMatchesKnn(img_left, kp_left, img_right, kp_right, matches_knn2,
+    failed_ratio_t_img = cv2.drawMatchesKnn(img_left, kp_left, img_right, kp_right, bad_matches,
                                             outImg=None,
                                             matchColor=(255, 0, 0),
                                             singlePointColor=(0, 255, 0),
-                                            matchesMask=mask_discarded,
+                                            matchesMask=mask_for_discarded,
                                             flags=0)
-    plt.subplot(3, 1, 3)
+    # plt.subplot(, 1, 3)
+    plt.figure()
     plt.imshow(failed_ratio_t_img)
     plt.title('The Matches that discarded by the ratio test')
 
