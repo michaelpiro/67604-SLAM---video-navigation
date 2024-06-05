@@ -160,6 +160,8 @@ def q2_2(matches, kp_left, kp_right):
 
 K, M1, M2 = read_cameras()
 P, Q = K @ M1, K @ M2  # multiply by intrinsic camera matrix
+
+
 def linear_least_squares_triangulation(P, Q, kp_left, kp_right):
     """
     Linear least squares triangulation
@@ -195,8 +197,6 @@ def triangulate_matched_points(P, Q, inliers, kp_left, kp_right):
     X = np.zeros((len(inliers), 3))
     for i in range(len(inliers)):
         p_left, p_right = kp_left[inliers[i].queryIdx], kp_right[inliers[i].trainIdx]
-        # p_x, p_y =
-        # q_x, q_y =
         X[i] = linear_least_squares_triangulation(P, Q, p_left.pt, p_right.pt)
     return X
 
@@ -216,18 +216,31 @@ def cv_triangulate_matched_points(inliers):
     # import mpl_toolkits.mplot3d.Axes3D as AX
 # mpl_toolkits.mplot3d.Axes3D.scatter
 
+def find_median_distance(X, X_cv):
+    """
+    Find the median distance between the triangulated points
+    :param X:
+    :param X_cv:
+    :return:
+    """
+    norm = np.linalg.norm(X - X_cv, axis=1)
+    return np.median(norm)
+
+def q2_3(inliers, kp_left, kp_right):
+    """
+    Triangulate the matched points and compare the results with OpenCV
+    :param inliers:
+    :param kp_left:
+    :param kp_right:
+    :return:
+    """
+    X = triangulate_matched_points(P, Q, inliers, kp_left, kp_right)
+    X_cv = cv_triangulate_matched_points(inliers)
+    median_distance = find_median_distance(X, X_cv)
+    print('Median distance between the triangulated points: ', median_distance)
+    #todo: plot 3d points
+    return X, X_cv
+
 inliers, outliers = q2_2(matches, kp_left, kp_right)
-tr = triangulate_matched_points(P, Q, inliers, kp_left, kp_right)
-cv_tr = cv_triangulate_matched_points(inliers)
-norm = np.linalg.norm(tr - cv_tr, axis=1)
-print(np.median(norm))
-# print(np.sum(np.square(triangulate_matched_points(P, Q, inliers, kp_left, kp_right) - cv_triangulate_matched_points(inliers))))
 
 
-# X_4d = cv2.triangulatePoints(P, Q, p_left.pt, p_right.pt)
-# X_4d /= (X_4d[3] + 1e-10)
-# print(X_4d[:-1].T)
-
-
-# print(cv_triangulate_matched_points(inliers)[0])
-# def q2_3():
