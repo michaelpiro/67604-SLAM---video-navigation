@@ -126,6 +126,7 @@ def q2_2(img_left, img_right, matches, kp_left, kp_right, title):
     :param matches: list of matches
     :param kp_left: list of keypoints in the left image
     :param kp_right:    list of keypoints in the right image
+    :param title:   title of the plot
     :return: inliers, outlayers
     """
     inliers = []
@@ -195,12 +196,12 @@ def linear_least_squares_triangulation(P, Q, kp_left, kp_right):
 def triangulate_matched_points(P, Q, inliers, kp_left, kp_right):
     """
     Triangulate the matched points
-    :param P:
-    :param Q:
-    :param inliers:
-    :param kp_left:
-    :param kp_right:
-    :return:
+    :param P: Camera matrix of image 1
+    :param Q: Camera matrix of image 2
+    :param inliers: list of inliers
+    :param kp_left: Key points in image 1
+    :param kp_right: Key points in image 2
+    :return:   3D points
     """
     X = np.zeros((len(inliers), 3))
     for i in range(len(inliers)):
@@ -222,7 +223,6 @@ def cv_triangulate_matched_points(inliers, kp_left, kp_right, P, Q):
         X_4d /= (X_4d[3] + 1e-10)
         X[i] = X_4d[:-1].T
     return X
-    # import mpl_toolkits.mplot3d.Axes3D as AX
 
 
 def find_median_distance(X, X_cv):
