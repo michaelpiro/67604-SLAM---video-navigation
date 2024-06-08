@@ -1,8 +1,12 @@
 import cv2
 import random
 import matplotlib.pyplot as plt
+# from mpl_toolkits.mplot3d import axes3D
+from mpl_toolkits.mplot3d import Axes3D
 import os
 import numpy as np
+# import mpl_toolkits.mplot3d.axes3d.
+# mpl_toolkits.mplot3d.axes3d.Axes3D.scatter
 
 MAC = True
 if MAC:
@@ -16,7 +20,8 @@ MAX_FEATURES = 501
 BAD_RATIO = 1
 GOOD_RATIO = 0.6
 IDX = 0
-
+FEATURE = cv2.ORB_create(MAX_FEATURES)
+MATCHER = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
 
 def read_images(idx):
     """
@@ -35,12 +40,15 @@ def read_images(idx):
     return img1, img2
 
 
-feature = cv2.ORB_create(MAX_FEATURES)
-img_left, img_right = read_images(IDX)
-kp_left, desc_left = feature.detectAndCompute(img_left, None)
-kp_right, desc_right = feature.detectAndCompute(img_right, None)
-matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
-matches = matcher.match(desc_left, desc_right)
+def read_and_extract_matches(index=0):
+    img_left, img_right = read_images(index)
+    kp_left, desc_left = FEATURE.detectAndCompute(img_left, None)
+    kp_right, desc_right = FEATURE.detectAndCompute(img_right, None)
+    matches = MATCHER.match(desc_left, desc_right)
+    return img_left, img_right, kp_left, kp_right, matches
+
+
+img_left, img_right, kp_left, kp_right, matches = read_and_extract_matches()
 
 
 def calculate_height_dist(matches, kp_left, kp_right):
@@ -85,7 +93,7 @@ def create_histogram(deviations):
     plt.xlabel('deviations from rectified stereo pattern')
     plt.ylabel('Number of Matches')
     plt.title('Histogram of Pixel Distance')
-    plt.show()
+    # plt.show()
 
 
 def print_precentage_of_deviate_2(deviations):
@@ -110,7 +118,7 @@ def q2_1():
     print_precentage_of_deviate_2(deviations)
 
 
-def q2_2(matches, kp_left, kp_right):
+def q2_2(img1, img2, matches, kp_left, kp_right):
     """
     present the inliers and outlayers
     :param matches: list of matches
@@ -133,7 +141,7 @@ def q2_2(matches, kp_left, kp_right):
 
     # Concatenate the images
     # space_vector = np.zeros((img_left.shape[0], 1024))
-    combined_image = np.vstack((img_left, img_right))
+    combined_image = np.vstack((img1, img2))
     # combined_image = np.hstack(combined_image, img_right)
 
     # Show the combined image
@@ -153,9 +161,9 @@ def q2_2(matches, kp_left, kp_right):
         x2, y2 = kp_right[ind_right].pt
         y2 += img_left.shape[0]   # Adjust x2 for the second image's position
         plt.scatter([x1, x2], [y1, y2], color='orange', s=1)
-
+    plt.title('Inliers (orange) and Outliers (cyan) of the Matches')
     plt.axis('off')
-    plt.show()
+    # plt.show()
     return inliers, outliers
 
 K, M1, M2 = read_cameras()
@@ -214,7 +222,7 @@ def cv_triangulate_matched_points(inliers):
         X[i] = X_4d[:-1].T
     return X
     # import mpl_toolkits.mplot3d.Axes3D as AX
-# mpl_toolkits.mplot3d.Axes3D.scatter
+
 
 def find_median_distance(X, X_cv):
     """
@@ -226,6 +234,7 @@ def find_median_distance(X, X_cv):
     norm = np.linalg.norm(X - X_cv, axis=1)
     return np.median(norm)
 
+
 def q2_3(inliers, kp_left, kp_right):
     """
     Triangulate the matched points and compare the results with OpenCV
@@ -234,13 +243,47 @@ def q2_3(inliers, kp_left, kp_right):
     :param kp_right:
     :return:
     """
-    X = triangulate_matched_points(P, Q, inliers, kp_left, kp_right)
-    X_cv = cv_triangulate_matched_points(inliers)
-    median_distance = find_median_distance(X, X_cv)
+    x = triangulate_matched_points(P, Q, inliers, kp_left, kp_right)
+    x_cv = cv_triangulate_matched_points(inliers)
+    plot3d_points(x)
+    plot3d_points(x_cv, title="Triangulated points using OpenCV")
+    median_distance = find_median_distance(x, x_cv)
     print('Median distance between the triangulated points: ', median_distance)
     #todo: plot 3d points
-    return X, X_cv
+    return x, x_cv
 
-inliers, outliers = q2_2(matches, kp_left, kp_right)
+
+def plot3d_points(points_vector, title="Triangulated points using linear least squares method"):
+    x1, y1, z1 = points_vector[:, 0], points_vector[:, 1], points_vector[:, 2]
+
+    fig = plt.figure(figsize=(15, 8))
+    ax = fig.add_subplot(projection='3d')
+    s1 = ax.scatter3D(x1, y1, z1, color='orange', s=1)
+    ax.set_title(title)
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.set_zlabel('z')
+    ax.set_xlim(-25, 25)
+    ax.set_ylim(-25, 25)
+    # ax.set_zlim(-5, 10)
+    plt.show()
+
+
+def q2_4():
+    images_index = random.sample(range(0, 3000), 1)
+    for i in images_index:
+        img_left_, img_right_, kp_left_, kp_right_, matches_ = read_and_extract_matches(i)
+        inliers_, outliers_ = q2_2(img_left_, img_right_, matches_, kp_left_, kp_right_)
+        x = triangulate_matched_points(P, Q, inliers_, kp_left_, kp_right_)
+        plot3d_points(x)
+
+
+
+
+img_left, img_right, kp_left, kp_right, matches = read_and_extract_matches(0)
+inliers, outliers = q2_2(img_left, img_right,matches, kp_left, kp_right)
+# points_vector, X_cv = q2_3(inliers, kp_left, kp_right)
+q2_3(inliers, kp_left, kp_right)
+# q2_4()
 
 
