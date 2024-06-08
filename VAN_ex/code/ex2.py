@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import os
 import numpy as np
 
-MAC = True
+MAC = False
 if MAC:
     DATA_PATH = 'VAN_ex/dataset/sequences/00'
     # DATA_PATH = 'dataset/sequences/00'
