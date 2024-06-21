@@ -11,7 +11,7 @@ if MAC:
     # DATA_PATH = 'dataset/sequences/00'
 else:
     DATA_PATH = r'...\VAN_ex\dataset\sequences\00\\'
-RANSAC_ITERATIONS = 1000
+RANSAC_ITERATIONS = 36
 def read_cameras():
     if MAC:
         data_path = '/Users/mac/67604-SLAM-video-navigation/VAN_ex/dataset/sequences/00/'
@@ -36,7 +36,6 @@ P, Q = K @ M1, K @ M2
 
 
 def q3_1():
-
     inliers_1, outliers_1 = ex2.extract_inliers_outliers(kp_l_1,kp_r_1,matches_1)
     inliers_0, outliers_0 = ex2.extract_inliers_outliers(kp_l_0,kp_r_0,matches_0)
     triangulated_0 = ex2.triangulate_matched_points(P,Q,inliers_0,kp_l_0,kp_r_0)
@@ -115,12 +114,18 @@ def extract_y_values(matches, kp_l, kp_r):
 
 def check_transform_agreed(T, matches_3d_l0, consensus_matches):
 
+    #extract y values from the matches
     real_l_0_pix_val,real_r_0_pix_val = extract_y_values(consensus_matches[:, 0], kp_l_0, kp_r_0)
     real_l_1_pix_val,real_r_1_pix_val = extract_y_values(consensus_matches[:, 1], kp_l_1, kp_r_1)
     ones = np.ones(( matches_3d_l0.shape[0],1))
     matches_in_4d = np.hstack((matches_3d_l0, ones)).T
+    # print(M1)
 
+
+    #3d points to first camera coordinate system
     pts3d_to_l0 = (M1 @ matches_in_4d)
+    # pts3d_to_l0 = matches_in_4d
+    # 3d points to second camera coordinate system
     pts3d_to_r0 = (M2 @ matches_in_4d)
 
     pix_values_l_0 = (K@pts3d_to_l0).T
@@ -139,7 +144,6 @@ def check_transform_agreed(T, matches_3d_l0, consensus_matches):
     pix_values_l_1_y = pix_values_l_1[:,1]
     agrees_l1 = np.abs(real_l_1_pix_val - pix_values_l_1_y) < 2
 
-
     to_3d = np.hstack((pts3d_to_r0.T, ones)).T
     pix_values_r_1 = (K @ T @ to_3d).T
     pix_values_r_1 = (pix_values_r_1 / pix_values_r_1[:,2].reshape(-1,1))[:,0:2]
@@ -147,6 +151,7 @@ def check_transform_agreed(T, matches_3d_l0, consensus_matches):
     agrees_r1 = np.abs(real_r_1_pix_val - pix_values_r_1_y) < 2
 
     agree_all = agrees_l0 & agrees_r0 & agrees_l1 & agrees_r1
+    # print(agree_all.shape)
     # points = np.where(agree_all)
     # return points
     return agree_all
@@ -173,24 +178,37 @@ def q3_4(relevant_idx,match,traingulated_pts ,T):
 
 
 
-
-
-
 def ransac_pnp(matches_idx, matches, traingulated_pts):
     """ Perform RANSAC to find the best transformation"""
     best_inliers = 0
     best_T = None
     best_matches_idx = None
+    relevant_3d_pts = traingulated_pts[matches_idx[:, 0]]
     for i in range(RANSAC_ITERATIONS):
         random_idx = np.random.choice(matches_idx.shape[0], 4, replace=False)
+        print(random_idx)
         random_matches = matches[random_idx]
-        random_traingulated_pts = traingulated_pts[random_idx]
-        T = cv2.solvePnPRansac(random_traingulated_pts, random_matches, K, None, flags=cv2.SOLVEPNP_EPNP)
-        inliers = check_transform_agreed(T, traingulated_pts, matches)
-        if np.sum(inliers) > best_inliers:
-            best_inliers = np.sum(inliers)
+        # print(random_matches)
+        img_pts = np.array([kp_l_1[m[1].queryIdx].pt for m in random_matches])
+        random_traingulated_pts = relevant_3d_pts[random_idx]
+        # print(img_pts)
+        # print(random_traingulated_pts)
+        success, rotation_vector, translation_vector = cv2.solvePnP(random_traingulated_pts,img_pts , K, distCoeffs= None, flags=cv2.SOLVEPNP_EPNP)
+        if success:
+            T = rodriguez_to_mat(rotation_vector, translation_vector)
+        else:
+            continue
+        # T = cv2.solvePnPRansac(random_traingulated_pts, random_matches, K, None, flags=cv2.SOLVEPNP_EPNP)
+        # print(matches.shape)
+        inliers_mat = check_transform_agreed(T, relevant_3d_pts, matches)
+        # print(np.sum(inliers_mat))
+        inliers_idx = np.where(inliers_mat)
+        # inliers = relevant_3d_pts[inliers_idx]
+        if np.sum(inliers_mat) > best_inliers:
+            best_inliers = np.sum(inliers_mat)
             best_T = T
-            best_matches_idx = inliers
+            best_matches_idx = inliers_idx
+    print(f"Best number of inliers: {best_inliers}")
     return best_T, best_matches_idx
 
 
@@ -205,7 +223,8 @@ if __name__ == '__main__':
     triangulated_pts_0, triangulated_pts_1,inl_lr_0,inl_lr_1 = q3_1()
     matches_l = q3_2()
     T = q3_3()
-    idx,match = choose_4_points_that_returns_matches(inl_lr_0, matches_l ,inl_lr_1)
+    idx,match = choose_4_points_that_returns_matches(matches_0, matches_l ,matches_1)
     print(q3_4(idx,match,triangulated_pts_0,T))
+    print(ransac_pnp(idx,match,triangulated_pts_0))
 
 
