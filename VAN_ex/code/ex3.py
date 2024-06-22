@@ -402,10 +402,10 @@ def perform_tracking(first_indx):
                                                                                                   img_r_first)
 
     for i in range(first_indx + 1, first_indx + LEN_DATA_SET):
-        # triangulated_first, in_first, out_first = extract_inliers_outliers_triangulate(P, Q, kp_l_first, kp_r_first,
-        #                                                                                matches_first)
+        triangulated_first, in_first, out_first = extract_inliers_outliers_triangulate(P, Q, kp_l_first, kp_r_first,
+                                                                                       matches_first)
         # relevant_descriptors_first = [desc_l_first[match.queryIdx] for match in in_first]
-        in_first = ex2.extract_inliers_outliers(kp_l_first, kp_r_first, matches_first)[0]
+        # in_first = ex2.extract_inliers_outliers(kp_l_first, kp_r_first, matches_first)[0]
 
         img_l_second, img_r_second = ex2.read_images(i)
         kp_l_second, kp_r_second, desc_l_second, desc_r_second, matches_second = extract_kps_descs_matches(img_l_second,
