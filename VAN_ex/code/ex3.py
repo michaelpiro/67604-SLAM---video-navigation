@@ -14,7 +14,7 @@ else:
 RANSAC_ITERATIONS = 36
 
 LEN_DATA_SET = len(os.listdir(DATA_PATH + 'image_0'))
-# LEN_DATA_SET = 100
+LEN_DATA_SET = 150
 
 GROUND_TRUTH_PATH = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/dataset/poses/00.txt"
 
@@ -253,7 +253,9 @@ def check_transform_agreed(T, matches_3d_l0, consensus_matches, kp_l_first, kp_r
     agrees_r1 = np.abs(real_r_1_pix_val - pix_values_r_1_y) < 2
 
     # Check agreement for all matches
-    agree_all = agrees_l0 & agrees_r0 & agrees_l1 & agrees_r1
+    agree_all1 = np.logical_and(agrees_l0, agrees_r0)
+    agree_all2 = np.logical_and(agrees_l1, agrees_r1)
+    agree_all = np.logical_and(agree_all1, agree_all2)
 
     return agree_all
 
@@ -463,13 +465,11 @@ def plot_points_on_img1_img2(idx,not_idx,matches,img1,img2,kp_l0,kp_l1):
     plt.figure()
     plt.subplot(2,1,1)
     plt.imshow(img1, cmap='gray')
-    print(kp_l0[idx])
     plt.scatter([m.pt[0] for m in kp_l0[idx]],[m.pt[1] for m in kp_l0[idx]], c='r', s=8)
     plt.scatter([m.pt[0] for m in kp_l0[not_idx]],[m.pt[1] for m in kp_l0[not_idx]], c='b', s=5)
     plt.title('left0: Points that agree with the transformation in red, disagree in blue')
     plt.subplot(2,1,2)
     plt.imshow(img2, cmap='gray')
-    print(kp_l0[idx])
     plt.scatter([m.pt[0] for m in kp_l1[idx]], [m.pt[1] for m in kp_l1[idx]], c='r', s=8)
     plt.scatter([m.pt[0] for m in kp_l1[not_idx]], [m.pt[1] for m in kp_l1[not_idx]], c='b', s=5)
     plt.title('left1: Points that agree with the transformation in red, disagree in blue')
@@ -490,7 +490,9 @@ def q3_5(matches_idx, matches, traingulated_pts, kp_l_first, kp_r_first, kp_l_se
     T, best_idx = find_best_transformation(matches, matches_idx, traingulated_pts, kp_l_first, kp_r_first, kp_l_second,
                                            kp_r_second)
 
-    transformed_pair0 = T @ (np.hstack(triangulated_pts_0, np.ones((triangulated_pts_0.shape[0], 1)))).T
+    transformed_pair0 = T @ (np.hstack((triangulated_pts_0, np.ones((triangulated_pts_0.shape[0], 1))))).T
+    transformed_pair0 = transformed_pair0.T
+    # print(transformed_pair0.shape)
     pair1 = triangulated_pts_1
     # Plotting
     plt.figure(figsize=(8, 6))
@@ -523,7 +525,24 @@ def q3_5(matches_idx, matches, traingulated_pts, kp_l_first, kp_r_first, kp_l_se
              max(np.max(z_coords_transformed), np.max(z_coords_pair1)) + 1)
 
     # Show the plot
-    plt.show()
+    # plt.show()
+    plt.figure()
+    plt.subplot(2,1,1)
+    plt.imshow(img_l_0, cmap='gray')
+    # print(kp_l0[idx])
+    plt.scatter([kp_l_0[m.queryIdx].pt[0] for m in inl_lr_0],[kp_l_0[m.queryIdx].pt[1] for m in inl_lr_0], c='r', s=4)
+
+    # plt.scatter([m.pt[0] for m in kp_l0[idx]],[m.pt[1] for m in kp_l0[idx]], c='r', s=8)
+    # plt.scatter([m.pt[0] for m in kp_l0[not_idx]],[m.pt[1] for m in kp_l0[not_idx]], c='b', s=5)
+    plt.title('left0: inliers')
+    plt.subplot(2,1,2)
+    plt.imshow(img_l_1, cmap='gray')
+    # print(kp_l0[idx])
+    plt.scatter([kp_l_1[m.queryIdx].pt[0] for m in inl_lr_1],[kp_l_1[m.queryIdx].pt[1] for m in inl_lr_1], c='r', s=4)
+    # plt.scatter([m.pt[0] for m in kp_l1[idx]], [m.pt[1] for m in kp_l1[idx]], c='r', s=8)
+    # plt.scatter([m.pt[0] for m in kp_l1[not_idx]], [m.pt[1] for m in kp_l1[not_idx]], c='b', s=5)
+    plt.title('left1: inliers')
+    # plt.show()
     return T, best_idx
 
     # return T, best_idx
@@ -554,11 +573,58 @@ def perform_tracking(first_indx):
         T, inliers_idx = find_best_transformation(match, idx, triangulated_from_concensus, kp_l_first, kp_r_first,
                                                   kp_l_second,
                                                   kp_r_second)
+        # last_T = transformations[-1] if transformations else M1
+        # last_row = np.array([0, 0, 0, 1])
+        # last_T = np.vstack((last_T, last_row))
+        # T =T @ last_T
         transformations.append(T)
         kp_l_first, kp_r_first = kp_l_second, kp_r_second
         desc_l_first, desc_r_first, matches_first = desc_l_second, desc_r_second, matches_second
     return transformations
 
+def q3_6():
+    transformations = perform_tracking(0)
+    transformations2 = read_extrinsic_matrices(n=LEN_DATA_SET)
+    loc = np.array([0, 0, 0])
+    real_loc = np.array([0, 0, 0])
+    for T_real,T in zip(transformations2,transformations):
+        R = T[:, :3]
+        t = T[:, 3:]
+        loc = np.vstack((loc,(-R.transpose() @ t).reshape((3))))
+        R = T_real[:, :3]
+        t = T_real[:, 3:]
+        real_loc = np.vstack((real_loc, (-R.transpose() @ t).reshape((3))))
+    # print(loc)
+
+    x_coords = loc[:, 0]
+    realx = real_loc[:, 0]
+    bad_mat1 = np.logical_or(x_coords > 1e3, x_coords < -1e3)
+    z_coords = loc[:, 2]
+    realz = real_loc[:, 2]
+    bad_mat2 =np.logical_or( z_coords > 1e3, z_coords < -1e3)
+    bad_mat = np.logical_or(bad_mat1, bad_mat2)
+    x_coords = x_coords[~bad_mat]
+    z_coords = z_coords[~bad_mat]
+    print(x_coords)
+
+    # Plotting
+    plt.figure(figsize=(8, 6))
+    plt.scatter(x_coords, z_coords, color='blue', marker='o')
+    plt.scatter(realx, realz, color='red', marker='o')
+
+    # Annotate the points with their labels for clarity
+    # for i, (x, z) in enumerate(zip(x_coords, z_coords)):
+    #     plt.annotate(camera_labels[i], (x, z), textcoords="offset points", xytext=(0, 10), ha='center')
+
+    # Adding labels and title
+    plt.xlabel('X Coordinate')
+    plt.ylabel('Z Coordinate')
+    plt.title('Relative Position of the Four Cameras (Top-Down View)')
+    plt.grid(True)
+    plt.axis('equal')  # Ensure the aspect ratio is equal
+    plt.show()
+
+    return loc, transformations
 
 if __name__ == '__main__':
     img_l_0, img_r_0 = ex2.read_images(0)
@@ -569,6 +635,7 @@ if __name__ == '__main__':
 
     triangulated_pts_0, triangulated_pts_1, inl_lr_0, inl_lr_1 = q3_1(kp_l_0, kp_r_0, matches_0, kp_l_1, kp_r_1,
                                                                       matches_1, P, Q)
+    # print(f"triang 1{triangulated_pts_1.shape}")
     matches_l = q3_2()
     T = q3_3(inl_lr_0, matches_l, inl_lr_1, triangulated_pts_0)
     # for i in cam_locations:
@@ -579,5 +646,5 @@ if __name__ == '__main__':
     ind,not_ind = q3_4(idx, match, triangulated_pts_0, T, kp_l_0, kp_r_0, kp_l_1, kp_r_1)
     plot_points_on_img1_img2(ind,not_ind,matches_0,img_l_0,img_l_1,kp_l_0,kp_l_1)
     T, inliers_idx = q3_5(idx, match, relevant_triangulated, kp_l_0, kp_r_0, kp_l_1, kp_r_1)
-    # transformations = perform_tracking(first_indx=0)
+    q3_6()
 
