@@ -11,10 +11,10 @@ if MAC:
     # DATA_PATH = 'dataset/sequences/00'
 else:
     DATA_PATH = r'...\VAN_ex\dataset\sequences\00\\'
-RANSAC_ITERATIONS = 100
+RANSAC_ITERATIONS = 36
 
 LEN_DATA_SET = len(os.listdir(DATA_PATH + 'image_0'))
-LEN_DATA_SET = 100
+LEN_DATA_SET = 1000
 
 GROUND_TRUTH_PATH = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/dataset/poses/00.txt"
 
@@ -93,20 +93,25 @@ def choose_4_points(matches_lr_0, matches_l0_l1, matches_lr1):
 def find_concensus_points_and_idx2(good_matches_lr_0, matches_l0_l1, good_matches_lr1):
     con = []
     matches = []
-    good_idx_l0 = [good_matches_lr_0[i].queryIdx for i in range(len(good_matches_lr_0))]
-    good_idx_l1 = [good_matches_lr1[i].queryIdx for i in range(len(good_matches_lr1))]
-    for match_l_l in matches_l0_l1:
-        ind_in_kp_l_0 = match_l_l.queryIdx
-        ind_in_kp_l_1 = match_l_l.trainIdx
-        is_a_good_match_0 = ind_in_kp_l_0 in good_idx_l0
-
-
-        for i0 in range(len(good_matches_lr_0)):
-            if kp_ll_0 == good_matches_lr_0[i0].queryIdx:
-                for i1 in range(len(good_matches_lr1)):
-                    if kp_ll_1 == good_matches_lr1[i1].queryIdx:
-                        con.append((i0, i1))
-                        matches.append((good_matches_lr_0[i0], good_matches_lr1[i1]))
+    # good_idx_l0 = [good_matches_lr_0[i].queryIdx for i in range(len(good_matches_lr_0))]
+    # good_idx_l1 = [good_matches_lr1[i].queryIdx for i in range(len(good_matches_lr1))]
+    for i in range(len(good_matches_lr_0)):
+        match = good_matches_lr_0[i]
+        for j in range(len(matches_l0_l1)):
+            if match.queryIdx == matches_l0_l1[j].queryIdx:
+                for k in range(len(good_matches_lr1)):
+                    if matches_l0_l1[j].trainIdx == good_matches_lr1[k].queryIdx:
+                        con.append((i, k))
+                        matches.append((good_matches_lr_0[i], good_matches_lr1[k]))
+        # if match.queryIdx in good_idx_l0 and match.trainIdx in good_idx_l1:
+        #     con.append((match.queryIdx, match.trainIdx))
+        #     matches.append((good_matches_lr_0[match.queryIdx], good_matches_lr1[match.trainIdx]))
+        # ind_in_kp_l_1 = match_l_l.trainIdx
+        # is_a_good_match_0 = ind_in_kp_l_0 in good_idx_l0
+        # is_a_good_match_1 = ind_in_kp_l_1 in good_idx_l1
+        # if is_a_good_match_0 and is_a_good_match_1:
+        #     con.append((ind_in_kp_l_0, ind_in_kp_l_1))
+        #     matches.append((good_matches_lr_0[ind_in_kp_l_0], good_matches_lr1[ind_in_kp_l_1]))
     return np.array(con), np.array(matches)
 
 
@@ -229,15 +234,17 @@ def check_transform_agreed(T, matches_3d_l0, consensus_matches, kp_l_first, kp_r
     agrees_r0 = np.abs(real_r_0_pix_val - pix_values_r_0_y) < 2
 
     # Apply transformation and project to second left camera
-    to_4d = np.hstack((pts3d_to_l0.T, ones)).T
-    pix_values_l_1 = (K @ T @ to_4d).T
+    # to_4d = np.hstack((pts3d_to_l0.T, ones)).T
+    pix_values_l_1 = (K @ T @ matches_in_4d).T
     pix_values_l_1 = (pix_values_l_1 / pix_values_l_1[:, 2].reshape(-1, 1))[:, 0:2]
     pix_values_l_1_y = pix_values_l_1[:, 1]
     agrees_l1 = np.abs(real_l_1_pix_val - pix_values_l_1_y) < 2
 
     # Apply transformation and project to second right camera
-    to_4d = np.hstack((pts3d_to_r0.T, ones)).T
-    pix_values_r_1 = (K @ T @ to_4d).T
+    # to_4d = np.hstack((pts3d_to_r0.T, ones)).T
+    pix_values_r_1 = (T @ matches_in_4d).T
+    pix_values_r_1 = np.hstack((pix_values_r_1, ones)).T
+    pix_values_r_1 = (K @ M2 @ pix_values_r_1).T
     pix_values_r_1 = (pix_values_r_1 / pix_values_r_1[:, 2].reshape(-1, 1))[:, 0:2]
     pix_values_r_1_y = pix_values_r_1[:, 1]
     agrees_r1 = np.abs(real_r_1_pix_val - pix_values_r_1_y) < 2
@@ -276,7 +283,7 @@ def ransac_pnp(matches_idx, matches, traingulated_pts, kp_l_first, kp_r_first, k
             best_inliers = np.sum(inliers_mat)
             best_T = T
             best_matches_idx = inliers_idx
-    print(f"Best number of inliers: {best_inliers}")
+    # print(f"Best number of inliers: {best_inliers}")
     return best_T, best_matches_idx
 
 
@@ -319,7 +326,7 @@ def q3_2():
 
 
 def q3_3(inl_lr_0, matches_l, inl_lr_1, triangulated_pts_0):
-    con,_ = find_concensus_points_and_idx(inl_lr_0, matches_l, inl_lr_1)
+    con = choose_4_points(inl_lr_0, matches_l, inl_lr_1)
     # choose random 4 points
     samps = random.sample(con, 4)
     image_pts = [kp_l_1[inl_lr_1[i[1]].queryIdx].pt for i in samps]
@@ -374,7 +381,7 @@ def perform_tracking(first_indx):
                                                                                                            img_r_second)
         in_second, out_second = ex2.extract_inliers_outliers(kp_l_second, kp_r_second, matches_second)
         matches_l_l = ex2.MATCHER.match(desc_l_first, desc_l_second)
-        idx, match = find_concensus_points_and_idx(in_first, matches_l_l, in_second)
+        idx, match = find_concensus_points_and_idx2(in_first, matches_l_l, in_second)
         T, inliers_idx = find_best_transformation(match, idx, triangulated_first, kp_l_first, kp_r_first, kp_l_second,
                                                   kp_r_second)
         # old_cam_mat = transformations[-1]
@@ -414,13 +421,22 @@ if __name__ == '__main__':
     extrinsic_matrices = read_extrinsic_matrices()
     diffs = []
     max = 0
+    num_bad = 0
     for i in range(1, LEN_DATA_SET):
         x = np.round(np.abs(transformations[i] - extrinsic_matrices[i]))
+        s = np.sum(x)
+        if s>100:
+            num_bad += 1
+
         # if x > max:
         #     max = x
         diffs.append(x)
-    for i in range(len(diffs)):
-        print(diffs[i])
-        print(i)
-        print("\n")
+    # for i in range(len(diffs)):
+    #     print(diffs[i])
+    #     print(i)
+    #     print("\n")
+    print(num_bad)
 
+# [[ 5.62741950e-03  3.30794270e-02 -9.99436883e-01  9.14760779e+00]
+#  [ 1.05197240e-02  9.99395445e-01  3.31372878e-02 -8.97308035e-02]
+#  [ 9.99928831e-01 -1.07002776e-02  5.27603097e-03 -1.23973387e+01]]
