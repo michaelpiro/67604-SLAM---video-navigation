@@ -11,10 +11,10 @@ if MAC:
     # DATA_PATH = 'dataset/sequences/00'
 else:
     DATA_PATH = r'...\VAN_ex\dataset\sequences\00\\'
-RANSAC_ITERATIONS = 36
+RANSAC_ITERATIONS = 50
 
 LEN_DATA_SET = len(os.listdir(DATA_PATH + 'image_0'))
-LEN_DATA_SET = 1000
+LEN_DATA_SET = 100
 
 GROUND_TRUTH_PATH = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/dataset/poses/00.txt"
 
@@ -39,7 +39,9 @@ def read_cameras():
 
 K, M1, M2 = read_cameras()
 P, Q = K @ M1, K @ M2
-def read_extrinsic_matrices(file_path = GROUND_TRUTH_PATH, n = LEN_DATA_SET):
+
+
+def read_extrinsic_matrices(file_path=GROUND_TRUTH_PATH, n=LEN_DATA_SET):
     """
     Reads n lines from a file and returns a list of extrinsic camera matrices.
 
@@ -59,11 +61,12 @@ def read_extrinsic_matrices(file_path = GROUND_TRUTH_PATH, n = LEN_DATA_SET):
                 break  # If less than n lines are available, stop reading
             numbers = list(map(float, line.strip().split()))
             if len(numbers) != 12:
-                raise ValueError(f"Line {i+1} does not contain 12 numbers.")
+                raise ValueError(f"Line {i + 1} does not contain 12 numbers.")
             matrix = np.array(numbers).reshape(3, 4)
             extrinsic_matrices.append(matrix)
 
     return extrinsic_matrices
+
 
 def extract_kps_descs_matches(img_0, img1):
     kp0, desc0 = ex2.FEATURE.detectAndCompute(img_0, None)
@@ -254,6 +257,7 @@ def check_transform_agreed(T, matches_3d_l0, consensus_matches, kp_l_first, kp_r
 
     return agree_all
 
+
 def ransac_pnp(matches_idx, matches, traingulated_pts, kp_l_first, kp_r_first, kp_l_second, kp_r_second):
     """ Perform RANSAC to find the best transformation"""
     best_inliers = 0
@@ -314,6 +318,7 @@ def extract_inliers_outliers_triangulate(P, Q, kp_l_first, kp_r_first, matches_f
     triangulated_0 = ex2.triangulate_matched_points(P, Q, inliers_0, kp_l_first, kp_r_first)
     return triangulated_0, inliers_0, outliers_0
 
+
 def extract_matches_from_images(img_0, img1):
     kp0, desc0 = ex2.FEATURE.detectAndCompute(img_0, None)
     kp1, desc1 = ex2.FEATURE.detectAndCompute(img1, None)
@@ -323,6 +328,29 @@ def extract_matches_from_images(img_0, img1):
 
 def q3_2():
     return extract_matches_from_images(img_l_0, img_l_1)[2]
+
+
+def calculate_4_camera_locations(T: np.array):
+    """
+    claculate the 4 diffferent cameras locations in regards to the first camera
+    using the formula of -RT(t) for each R t Extrinsic matrix
+    :return: the 4 camera locations as a 4 array of 3d points
+    """
+    left_camera_0 = np.zeros(3)  # the first camera is always at the center
+    # first camera, the right, as cordination in the global where left0 is center
+    # M2 is our extrinsic Matrix
+    RM2 = np.array(M2[:,:3])
+    tM2 = np.array(M2[:, 3:])
+    right_camera_0 = -(RM2.transpose() @ tM2)
+    # left1 camera place, with T our transformation
+    Rleft1 = np.array(T[:, :3])
+    tleft1 = np.array(T[:, 3:])
+    left_camera_1 = -(Rleft1.transpose() @ tleft1)
+
+    # finally, the right camera would neet to use the T transformation and M2 together as we difined in q3.3
+    # the extrinsic matrix is [M2T|M2(tLeft1)+tM2] so the camera location would be
+    right_camera_1 = -((RM2 @ Rleft1).transpose() @ ((RM2 @ tleft1) + tM2))
+    return left_camera_0, right_camera_0, left_camera_1, right_camera_1
 
 
 def q3_3(inl_lr_0, matches_l, inl_lr_1, triangulated_pts_0):
@@ -339,7 +367,8 @@ def q3_3(inl_lr_0, matches_l, inl_lr_1, triangulated_pts_0):
     success, rotation_vector, translation_vector = cv2.solvePnP(tri_samps, image_pts, K, distCoeffs=diff_coeff,
                                                                 flags=cv2.SOLVEPNP_EPNP)
     if success:
-        return rodriguez_to_mat(rotation_vector, translation_vector)
+        T = rodriguez_to_mat(rotation_vector, translation_vector)
+        return T, calculate_4_camera_locations(T)
     else:
         return None
 
@@ -367,23 +396,33 @@ def q3_5(matches_idx, matches, traingulated_pts, kp_l_first, kp_r_first, kp_l_se
 def perform_tracking(first_indx):
     first_cam_mat = M1
     intrinsics = K
-    transformations = [M1]
+    transformations = []
     img_l_first, img_r_first = ex2.read_images(first_indx)
     kp_l_first, kp_r_first, desc_l_first, desc_r_first, matches_first = extract_kps_descs_matches(img_l_first,
                                                                                                   img_r_first)
 
-    for i in range(first_indx + 1, LEN_DATA_SET):
+    for i in range(first_indx + 1, first_indx + LEN_DATA_SET):
+        # triangulated_first, in_first, out_first = extract_inliers_outliers_triangulate(P, Q, kp_l_first, kp_r_first,
+        #                                                                                matches_first)
+        # relevant_descriptors_first = [desc_l_first[match.queryIdx] for match in in_first]
+        in_first = ex2.extract_inliers_outliers(kp_l_first, kp_r_first, matches_first)[0]
 
-        triangulated_first, in_first, out_first = extract_inliers_outliers_triangulate(P, Q, kp_l_first, kp_r_first,
-                                                                                       matches_first)
         img_l_second, img_r_second = ex2.read_images(i)
         kp_l_second, kp_r_second, desc_l_second, desc_r_second, matches_second = extract_kps_descs_matches(img_l_second,
                                                                                                            img_r_second)
+
         in_second, out_second = ex2.extract_inliers_outliers(kp_l_second, kp_r_second, matches_second)
+        # relevant_descriptors_second = [desc_l_second[match.queryIdx] for match in in_second]
+
         matches_l_l = ex2.MATCHER.match(desc_l_first, desc_l_second)
+        # matches_l_l = ex2.MATCHER.match(np.array(relevant_descriptors_first), np.array(relevant_descriptors_second))
+
+        # idx, match = find_concensus_points_and_idx2(in_first, matches_l_l, in_second)
         idx, match = find_concensus_points_and_idx2(in_first, matches_l_l, in_second)
         T, inliers_idx = find_best_transformation(match, idx, triangulated_first, kp_l_first, kp_r_first, kp_l_second,
                                                   kp_r_second)
+        # T, inliers_idx = q3_5(idx, match, triangulated_first, relevant_kp_l_first, relevant_kp_r_first,
+        #                         relevant_kp_l_second, relevant_kp_r_second)
         # old_cam_mat = transformations[-1]
         # last_line = np.array([0, 0, 0, 1])
         # old_cam_mat = np.vstack((old_cam_mat, last_line))
@@ -397,8 +436,6 @@ def perform_tracking(first_indx):
     return transformations
 
 
-
-
 if __name__ == '__main__':
     img_l_0, img_r_0 = ex2.read_images(0)
     kp_l_0, kp_r_0, matches_0 = extract_matches_from_images(img_l_0, img_r_0)
@@ -409,7 +446,10 @@ if __name__ == '__main__':
     triangulated_pts_0, triangulated_pts_1, inl_lr_0, inl_lr_1 = q3_1(kp_l_0, kp_r_0, matches_0, kp_l_1, kp_r_1,
                                                                       matches_1, P, Q)
     matches_l = q3_2()
-    T = q3_3(inl_lr_0, matches_l, inl_lr_1, triangulated_pts_0)
+    T,cam_locations = q3_3(inl_lr_0, matches_l, inl_lr_1, triangulated_pts_0)
+    # for i in cam_locations:
+    #     print(i)
+    # print(cam_locations)
     idx, match = find_concensus_points_and_idx(inl_lr_0, matches_l, inl_lr_1)
 
     print(q3_4(idx, match, triangulated_pts_0, T, kp_l_0, kp_r_0, kp_l_1, kp_r_1))
@@ -417,24 +457,25 @@ if __name__ == '__main__':
     T, inliers_idx = q3_5(idx, match, triangulated_pts_0, kp_l_0, kp_r_0, kp_l_1, kp_r_1)
 
     #
-    transformations = perform_tracking(0)
-    extrinsic_matrices = read_extrinsic_matrices()
+    transformations = perform_tracking(first_indx=1000)
+    extrinsic_matrices = read_extrinsic_matrices(n=136)
+    print(len(transformations))
+    # print(len(extrinsic_matrices))
     diffs = []
     max = 0
     num_bad = 0
-    for i in range(1, LEN_DATA_SET):
-        x = np.round(np.abs(transformations[i] - extrinsic_matrices[i]))
-        s = np.sum(x)
-        if s>100:
-            num_bad += 1
+    for i in range(0, LEN_DATA_SET, 1):
+        # print(i)
+        x = np.round(np.abs(transformations[i - 35] - extrinsic_matrices[i]))
+        diffs.append(x)
 
         # if x > max:
         #     max = x
-        diffs.append(x)
-    # for i in range(len(diffs)):
-    #     print(diffs[i])
-    #     print(i)
-    #     print("\n")
+        # diffs.append(x)
+    for i in range(len(diffs)):
+        print(diffs[i])
+        print(i)
+        print("\n")
     print(num_bad)
 
 # [[ 5.62741950e-03  3.30794270e-02 -9.99436883e-01  9.14760779e+00]
