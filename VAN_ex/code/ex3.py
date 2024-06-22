@@ -11,7 +11,7 @@ if MAC:
     # DATA_PATH = 'dataset/sequences/00'
 else:
     DATA_PATH = r'...\VAN_ex\dataset\sequences\00\\'
-RANSAC_ITERATIONS = 40
+RANSAC_ITERATIONS = 100
 
 LEN_DATA_SET = len(os.listdir(DATA_PATH + 'image_0'))
 LEN_DATA_SET = 100
@@ -39,7 +39,31 @@ def read_cameras():
 
 K, M1, M2 = read_cameras()
 P, Q = K @ M1, K @ M2
+def read_extrinsic_matrices(file_path = GROUND_TRUTH_PATH, n = LEN_DATA_SET):
+    """
+    Reads n lines from a file and returns a list of extrinsic camera matrices.
 
+    Args:
+    - file_path (str): Path to the file containing the extrinsic matrices.
+    - n (int): Number of lines (matrices) to read from the file.
+
+    Returns:
+    - List[np.ndarray]: A list of n extrinsic camera matrices (each a 3x4 numpy array).
+    """
+    extrinsic_matrices = []
+
+    with open(file_path, 'r') as file:
+        for i in range(n):
+            line = file.readline()
+            if not line:
+                break  # If less than n lines are available, stop reading
+            numbers = list(map(float, line.strip().split()))
+            if len(numbers) != 12:
+                raise ValueError(f"Line {i+1} does not contain 12 numbers.")
+            matrix = np.array(numbers).reshape(3, 4)
+            extrinsic_matrices.append(matrix)
+
+    return extrinsic_matrices
 
 def extract_kps_descs_matches(img_0, img1):
     kp0, desc0 = ex2.FEATURE.detectAndCompute(img_0, None)
@@ -66,18 +90,38 @@ def choose_4_points(matches_lr_0, matches_l0_l1, matches_lr1):
     return con
 
 
-def find_concensus_points_and_idx(matches_lr_0, matches_l0_l1, matches_lr1):
+def find_concensus_points_and_idx2(good_matches_lr_0, matches_l0_l1, good_matches_lr1):
+    con = []
+    matches = []
+    good_idx_l0 = [good_matches_lr_0[i].queryIdx for i in range(len(good_matches_lr_0))]
+    good_idx_l1 = [good_matches_lr1[i].queryIdx for i in range(len(good_matches_lr1))]
+    for match_l_l in matches_l0_l1:
+        ind_in_kp_l_0 = match_l_l.queryIdx
+        ind_in_kp_l_1 = match_l_l.trainIdx
+        is_a_good_match_0 = ind_in_kp_l_0 in good_idx_l0
+
+
+        for i0 in range(len(good_matches_lr_0)):
+            if kp_ll_0 == good_matches_lr_0[i0].queryIdx:
+                for i1 in range(len(good_matches_lr1)):
+                    if kp_ll_1 == good_matches_lr1[i1].queryIdx:
+                        con.append((i0, i1))
+                        matches.append((good_matches_lr_0[i0], good_matches_lr1[i1]))
+    return np.array(con), np.array(matches)
+
+
+def find_concensus_points_and_idx(good_matches_lr_0, matches_l0_l1, good_matches_lr1):
     con = []
     matches = []
     for match_l_l in matches_l0_l1:
         kp_ll_0 = match_l_l.queryIdx
         kp_ll_1 = match_l_l.trainIdx
-        for i0 in range(len(matches_lr_0)):
-            if kp_ll_0 == matches_lr_0[i0].queryIdx:
-                for i1 in range(len(matches_lr1)):
-                    if kp_ll_1 == matches_lr1[i1].queryIdx:
+        for i0 in range(len(good_matches_lr_0)):
+            if kp_ll_0 == good_matches_lr_0[i0].queryIdx:
+                for i1 in range(len(good_matches_lr1)):
+                    if kp_ll_1 == good_matches_lr1[i1].queryIdx:
                         con.append((i0, i1))
-                        matches.append((matches_lr_0[i0], matches_lr1[i1]))
+                        matches.append((good_matches_lr_0[i0], good_matches_lr1[i1]))
     return np.array(con), np.array(matches)
 
 
@@ -239,6 +283,7 @@ def ransac_pnp(matches_idx, matches, traingulated_pts, kp_l_first, kp_r_first, k
 def find_best_transformation(matches, matches_idx, traingulated_pts, kp_l_first, kp_r_first, kp_l_second, kp_r_second):
     T, inliers_idx = ransac_pnp(matches_idx, matches, traingulated_pts, kp_l_first, kp_r_first, kp_l_second,
                                 kp_r_second)
+    # return T,inliers_idx
     relevant_3d_pts = traingulated_pts[matches_idx[:, 0]][inliers_idx]
     # relevant_3d_pts = relevant_3d_pts[inliers_idx]
     best_matches = matches[inliers_idx]
@@ -262,13 +307,19 @@ def extract_inliers_outliers_triangulate(P, Q, kp_l_first, kp_r_first, matches_f
     triangulated_0 = ex2.triangulate_matched_points(P, Q, inliers_0, kp_l_first, kp_r_first)
     return triangulated_0, inliers_0, outliers_0
 
+def extract_matches_from_images(img_0, img1):
+    kp0, desc0 = ex2.FEATURE.detectAndCompute(img_0, None)
+    kp1, desc1 = ex2.FEATURE.detectAndCompute(img1, None)
+    matches = ex2.MATCHER.match(desc0, desc1)
+    return kp0, kp1, matches
+
 
 def q3_2():
-    return ex2.extract_matches_from_images(img_l_0, img_l_1)[2]
+    return extract_matches_from_images(img_l_0, img_l_1)[2]
 
 
 def q3_3(inl_lr_0, matches_l, inl_lr_1, triangulated_pts_0):
-    con = choose_4_points(inl_lr_0, matches_l, inl_lr_1)
+    con,_ = find_concensus_points_and_idx(inl_lr_0, matches_l, inl_lr_1)
     # choose random 4 points
     samps = random.sample(con, 4)
     image_pts = [kp_l_1[inl_lr_1[i[1]].queryIdx].pt for i in samps]
@@ -339,38 +390,14 @@ def perform_tracking(first_indx):
     return transformations
 
 
-def read_extrinsic_matrices(file_path = GROUND_TRUTH_PATH, n = LEN_DATA_SET):
-    """
-    Reads n lines from a file and returns a list of extrinsic camera matrices.
 
-    Args:
-    - file_path (str): Path to the file containing the extrinsic matrices.
-    - n (int): Number of lines (matrices) to read from the file.
-
-    Returns:
-    - List[np.ndarray]: A list of n extrinsic camera matrices (each a 3x4 numpy array).
-    """
-    extrinsic_matrices = []
-
-    with open(file_path, 'r') as file:
-        for i in range(n):
-            line = file.readline()
-            if not line:
-                break  # If less than n lines are available, stop reading
-            numbers = list(map(float, line.strip().split()))
-            if len(numbers) != 12:
-                raise ValueError(f"Line {i+1} does not contain 12 numbers.")
-            matrix = np.array(numbers).reshape(3, 4)
-            extrinsic_matrices.append(matrix)
-
-    return extrinsic_matrices
 
 if __name__ == '__main__':
     img_l_0, img_r_0 = ex2.read_images(0)
-    kp_l_0, kp_r_0, matches_0 = ex2.extract_matches_from_images(img_l_0, img_r_0)
+    kp_l_0, kp_r_0, matches_0 = extract_matches_from_images(img_l_0, img_r_0)
 
     img_l_1, img_r_1 = ex2.read_images(1)
-    kp_l_1, kp_r_1, matches_1 = ex2.extract_matches_from_images(img_l_1, img_r_1)
+    kp_l_1, kp_r_1, matches_1 = extract_matches_from_images(img_l_1, img_r_1)
 
     triangulated_pts_0, triangulated_pts_1, inl_lr_0, inl_lr_1 = q3_1(kp_l_0, kp_r_0, matches_0, kp_l_1, kp_r_1,
                                                                       matches_1, P, Q)
