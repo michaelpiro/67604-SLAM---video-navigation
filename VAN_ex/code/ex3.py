@@ -14,7 +14,7 @@ else:
 RANSAC_ITERATIONS = 40
 
 LEN_DATA_SET = len(os.listdir(DATA_PATH + 'image_0'))
-LEN_DATA_SET = 10
+LEN_DATA_SET = 100
 
 GROUND_TRUTH_PATH = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/dataset/poses/00.txt"
 
@@ -66,7 +66,7 @@ def choose_4_points(matches_lr_0, matches_l0_l1, matches_lr1):
     return con
 
 
-def choose_4_points_that_returns_matches(matches_lr_0, matches_l0_l1, matches_lr1):
+def find_concensus_points_and_idx(matches_lr_0, matches_l0_l1, matches_lr1):
     con = []
     matches = []
     for match_l_l in matches_l0_l1:
@@ -97,50 +97,111 @@ def extract_y_values(matches, kp_l, kp_r):
     return y_values_1, y_values_2
 
 
-def check_transform_agreed(T, matches_3d_l0, consensus_matches, kp_l_first, kp_r_first, kp_l_second, kp_r_second):
-    # todo: to change the calculation of r1 to the M2@(L1 POINTS)
+# def check_transform_agreed(T, matches_3d_l0, consensus_matches, kp_l_first, kp_r_first, kp_l_second, kp_r_second):
+#     # todo: to change the calculation of r1 to the M2@(L1 POINTS)
+#
+#     # extract y values from the matches
+#     real_l_0_pix_val, real_r_0_pix_val = extract_y_values(consensus_matches[:, 0], kp_l_first, kp_r_first)
+#     real_l_1_pix_val, real_r_1_pix_val = extract_y_values(consensus_matches[:, 1], kp_l_second, kp_r_second)
+#     ones = np.ones((matches_3d_l0.shape[0], 1))
+#     matches_in_4d = np.hstack((matches_3d_l0, ones)).T
+#     # print(M1)
+#
+#     # 3d points to first camera coordinate system
+#     pts3d_to_l0 = (M1 @ matches_in_4d)
+#     # pts3d_to_l0 = matches_in_4d
+#     # 3d points to second camera coordinate system
+#     pts3d_to_r0 = (M2 @ matches_in_4d)
+#
+#     pix_values_l_0 = (K @ pts3d_to_l0).T
+#     pix_values_l_0 = (pix_values_l_0 / pix_values_l_0[:, 2].reshape(-1, 1))[:, 0:2]
+#     pix_values_l_0_y = pix_values_l_0[:, 1]
+#     agrees_l0 = np.abs(real_l_0_pix_val - pix_values_l_0_y) < 2
+#
+#     pix_values_r_0 = (K @ pts3d_to_r0).T
+#     pix_values_r_0 = (pix_values_r_0 / pix_values_r_0[:, 2].reshape(-1, 1))[:, 0:2]
+#     pix_values_r_0_y = pix_values_r_0[:, 1]
+#     agrees_r0 = np.abs(real_r_0_pix_val - pix_values_r_0_y) < 2
+#
+#     to_4d = np.hstack((pts3d_to_l0.T, ones)).T
+#     pix_values_l_1 = (K @ T @ to_4d).T
+#     pix_values_l_1 = (pix_values_l_1 / pix_values_l_1[:, 2].reshape(-1, 1))[:, 0:2]
+#     pix_values_l_1_y = pix_values_l_1[:, 1]
+#     agrees_l1 = np.abs(real_l_1_pix_val - pix_values_l_1_y) < 2
+#
+#     to_4d = np.hstack((pts3d_to_r0.T, ones)).T
+#     pix_values_r_1 = (K @ T @ to_4d).T
+#     pix_values_r_1 = (pix_values_r_1 / pix_values_r_1[:, 2].reshape(-1, 1))[:, 0:2]
+#     pix_values_r_1_y = pix_values_r_1[:, 1]
+#     agrees_r1 = np.abs(real_r_1_pix_val - pix_values_r_1_y) < 2
+#
+#     agree_all = agrees_l0 & agrees_r0 & agrees_l1 & agrees_r1
+#     # print(agree_all.shape)
+#     # points = np.where(agree_all)
+#     # return points
+#     return agree_all
 
-    # extract y values from the matches
+
+def check_transform_agreed(T, matches_3d_l0, consensus_matches, kp_l_first, kp_r_first, kp_l_second, kp_r_second):
+    """
+    Checks if the transformation agrees with the given matches and keypoints.
+
+    Args:
+    - T (np.ndarray): Transformation matrix.
+    - matches_3d_l0 (np.ndarray): 3D points of the matches from the first left camera.
+    - consensus_matches (np.ndarray): Array of consensus matches between images.
+    - kp_l_first (list of cv2.KeyPoint): Keypoints from the first left image.
+    - kp_r_first (list of cv2.KeyPoint): Keypoints from the first right image.
+    - kp_l_second (list of cv2.KeyPoint): Keypoints from the second left image.
+    - kp_r_second (list of cv2.KeyPoint): Keypoints from the second right image.
+
+    Returns:
+    - agree_all (np.ndarray): Boolean array indicating agreement for each match.
+    """
+    # Extract y values from the matches
     real_l_0_pix_val, real_r_0_pix_val = extract_y_values(consensus_matches[:, 0], kp_l_first, kp_r_first)
     real_l_1_pix_val, real_r_1_pix_val = extract_y_values(consensus_matches[:, 1], kp_l_second, kp_r_second)
+
+    # Append ones to the 3D matches
     ones = np.ones((matches_3d_l0.shape[0], 1))
     matches_in_4d = np.hstack((matches_3d_l0, ones)).T
-    # print(M1)
 
-    # 3d points to first camera coordinate system
+    # 3D points to first camera coordinate system
     pts3d_to_l0 = (M1 @ matches_in_4d)
-    # pts3d_to_l0 = matches_in_4d
-    # 3d points to second camera coordinate system
+
+    # 3D points to second camera coordinate system
     pts3d_to_r0 = (M2 @ matches_in_4d)
 
+    # Project points to image coordinates for the first left camera
     pix_values_l_0 = (K @ pts3d_to_l0).T
     pix_values_l_0 = (pix_values_l_0 / pix_values_l_0[:, 2].reshape(-1, 1))[:, 0:2]
     pix_values_l_0_y = pix_values_l_0[:, 1]
     agrees_l0 = np.abs(real_l_0_pix_val - pix_values_l_0_y) < 2
 
+    # Project points to image coordinates for the first right camera
     pix_values_r_0 = (K @ pts3d_to_r0).T
     pix_values_r_0 = (pix_values_r_0 / pix_values_r_0[:, 2].reshape(-1, 1))[:, 0:2]
     pix_values_r_0_y = pix_values_r_0[:, 1]
     agrees_r0 = np.abs(real_r_0_pix_val - pix_values_r_0_y) < 2
 
+    # Apply transformation and project to second left camera
     to_4d = np.hstack((pts3d_to_l0.T, ones)).T
     pix_values_l_1 = (K @ T @ to_4d).T
     pix_values_l_1 = (pix_values_l_1 / pix_values_l_1[:, 2].reshape(-1, 1))[:, 0:2]
     pix_values_l_1_y = pix_values_l_1[:, 1]
     agrees_l1 = np.abs(real_l_1_pix_val - pix_values_l_1_y) < 2
 
+    # Apply transformation and project to second right camera
     to_4d = np.hstack((pts3d_to_r0.T, ones)).T
     pix_values_r_1 = (K @ T @ to_4d).T
     pix_values_r_1 = (pix_values_r_1 / pix_values_r_1[:, 2].reshape(-1, 1))[:, 0:2]
     pix_values_r_1_y = pix_values_r_1[:, 1]
     agrees_r1 = np.abs(real_r_1_pix_val - pix_values_r_1_y) < 2
 
+    # Check agreement for all matches
     agree_all = agrees_l0 & agrees_r0 & agrees_l1 & agrees_r1
-    # print(agree_all.shape)
-    # points = np.where(agree_all)
-    # return points
-    return agree_all
 
+    return agree_all
 
 def ransac_pnp(matches_idx, matches, traingulated_pts, kp_l_first, kp_r_first, kp_l_second, kp_r_second):
     """ Perform RANSAC to find the best transformation"""
@@ -171,7 +232,7 @@ def ransac_pnp(matches_idx, matches, traingulated_pts, kp_l_first, kp_r_first, k
             best_inliers = np.sum(inliers_mat)
             best_T = T
             best_matches_idx = inliers_idx
-    # print(f"Best number of inliers: {best_inliers}")
+    print(f"Best number of inliers: {best_inliers}")
     return best_T, best_matches_idx
 
 
@@ -246,7 +307,7 @@ def q3_5(matches_idx, matches, traingulated_pts, kp_l_first, kp_r_first, kp_l_se
 
 
 def perform_tracking(first_indx):
-    fisrt_cam_mat = M1
+    first_cam_mat = M1
     intrinsics = K
     transformations = [M1]
     img_l_first, img_r_first = ex2.read_images(first_indx)
@@ -262,17 +323,17 @@ def perform_tracking(first_indx):
                                                                                                            img_r_second)
         in_second, out_second = ex2.extract_inliers_outliers(kp_l_second, kp_r_second, matches_second)
         matches_l_l = ex2.MATCHER.match(desc_l_first, desc_l_second)
-        idx, match = choose_4_points_that_returns_matches(in_first, matches_l_l, in_second)
+        idx, match = find_concensus_points_and_idx(in_first, matches_l_l, in_second)
         T, inliers_idx = find_best_transformation(match, idx, triangulated_first, kp_l_first, kp_r_first, kp_l_second,
                                                   kp_r_second)
-        old_cam_mat = transformations[-1]
-        last_line = np.array([0, 0, 0, 1])
-        old_cam_mat = np.vstack((old_cam_mat, last_line))
+        # old_cam_mat = transformations[-1]
+        # last_line = np.array([0, 0, 0, 1])
+        # old_cam_mat = np.vstack((old_cam_mat, last_line))
         # print(T)
         # print(old_cam_mat)
-        new_cam_mat = T @ old_cam_mat
+        # new_cam_mat = T @ old_cam_mat
         # print(new_cam_mat)
-        transformations.append(new_cam_mat)
+        transformations.append(T)
         kp_l_first, kp_r_first = kp_l_second, kp_r_second
         desc_l_first, desc_r_first, matches_first = desc_l_second, desc_r_second, matches_second
     return transformations
@@ -315,7 +376,7 @@ if __name__ == '__main__':
                                                                       matches_1, P, Q)
     matches_l = q3_2()
     T = q3_3(inl_lr_0, matches_l, inl_lr_1, triangulated_pts_0)
-    idx, match = choose_4_points_that_returns_matches(inl_lr_0, matches_l, inl_lr_1)
+    idx, match = find_concensus_points_and_idx(inl_lr_0, matches_l, inl_lr_1)
 
     print(q3_4(idx, match, triangulated_pts_0, T, kp_l_0, kp_r_0, kp_l_1, kp_r_1))
     # print(ransac_pnp(idx, match, triangulated_pts_0))
@@ -325,10 +386,14 @@ if __name__ == '__main__':
     transformations = perform_tracking(0)
     extrinsic_matrices = read_extrinsic_matrices()
     diffs = []
-    for i in range(0, LEN_DATA_SET):
-        # diffs.append(transformations[i] - extrinsic_matrices[i])
-        diffs.append(transformations[i])
-    for diff in diffs:
-        print(diff)
+    max = 0
+    for i in range(1, LEN_DATA_SET):
+        x = np.round(np.abs(transformations[i] - extrinsic_matrices[i]))
+        # if x > max:
+        #     max = x
+        diffs.append(x)
+    for i in range(len(diffs)):
+        print(diffs[i])
+        print(i)
         print("\n")
 
