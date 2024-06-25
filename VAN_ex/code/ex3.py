@@ -7,6 +7,8 @@ import numpy as np
 from tqdm import tqdm
 from timeit import default_timer as timer
 
+
+
 MAC = True
 if MAC:
     DATA_PATH = '/Users/mac/67604-SLAM-video-navigation/VAN_ex/dataset/sequences/00/'
@@ -18,20 +20,26 @@ SEC_PROB = 0.99
 OUTLIER_PROB = 0.6
 MIN_SET_SIZE = 4
 # RANSAC_ITERATIONS = int(np.log(1 - SEC_PROB) / np.log(1 - np.power(1 - OUTLIER_PROB, MIN_SET_SIZE))) + 1
-# print(RANSAC_ITERATIONS)
-RANSAC_ITERATIONS = 100
+RANSAC_ITERATIONS = 50
 
 LEN_DATA_SET = len(os.listdir(DATA_PATH + 'image_0'))
-LEN_DATA_SET = 500
+# LEN_DATA_SET = 500
 
 GROUND_TRUTH_PATH = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/dataset/poses/00.txt"
 
-# index_params = dict(algorithm=0, trees=20)
-# search_params = dict(checks=150)
+# FLANN_INDEX_KDTREE = 0
+# index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
+# search_params = dict(checks=50)
 # MATCHER = cv2.FlannBasedMatcher(index_params, search_params)
 MAX_FEATURES = 1000
-FEATURE = cv2.SIFT_create(MAX_FEATURES)
-MATCHER = cv2.BFMatcher(normType=cv2.NORM_L2, crossCheck=True)
+hessianThreshold = 3000
+# fast = cv2.FastFeatureDetector_create()
+# brief = cv2.xfeatures2d.BriefDescriptorExtractor_create()
+FEATURE = cv2.AKAZE_create()
+# FEATURE = cv2.FastFeatureDetector_create(threshold = 80,
+#                                      nonmaxSuppression = True)
+FEATURE.setThreshold(0.001)
+MATCHER = cv2.BFMatcher(normType=cv2.NORM_HAMMING, crossCheck=True)
 
 
 def read_cameras():
@@ -84,10 +92,56 @@ def read_extrinsic_matrices(file_path=GROUND_TRUTH_PATH, n=LEN_DATA_SET):
 
 
 def extract_kps_descs_matches(img_0, img1):
-    kp0, desc0 = FEATURE.detectAndCompute(img_0, None)
-    kp1, desc1 = FEATURE.detectAndCompute(img1, None)
+    kp0 = FEATURE.detect(img_0, None)
+    kp1 = FEATURE.detect(img1, None)
+    desc0 = FEATURE.compute(img_0, kp0)[1]
+    desc1 = FEATURE.compute(img1, kp1)[1]
     matches = MATCHER.match(desc0, desc1)
     return kp0, kp1, desc0, desc1, matches
+    # kp0, desc0 = FEATURE.detectAndCompute(img_0, None)
+    # kp1, desc1 = FEATURE.detectAndCompute(img1, None)
+    # matches = MATCHER.match(desc0, desc1)
+    # return kp0, kp1, desc0, desc1, matches
+
+
+# def extract_inliers_outliers(kp_left, kp_right, matches):
+#     inliers = []
+#     outliers = []
+#     for i in range(len(matches)):
+#         ind_left = matches[i].queryIdx # index of kp_left
+#         ind_right = matches[i].trainIdx # index of kp_right
+#
+#         good_map1 = abs(kp_left[ind_left].pt[1] - kp_right[ind_right].pt[1]) < 2
+#         good_map2 = kp_left[ind_left].pt[0] > kp_right[ind_right].pt[0]
+#         if good_map1 and good_map2:
+#             inliers.append(matches[i])
+#         else:
+#             outliers.append(matches[i])
+#     return inliers, outliers
+
+def extract_inliers_outliers(kp_left, kp_right, matches):
+    # Convert keypoints to numpy arrays for efficient computation
+    kp_left_pts = np.array([kp.pt for kp in kp_left])
+    kp_right_pts = np.array([kp.pt for kp in kp_right])
+
+    inliers = []
+    outliers = []
+
+    for match in matches:
+        ind_left = match.queryIdx
+        ind_right = match.trainIdx
+
+        # Use numpy arrays for comparisons
+        good_map1 = abs(kp_left_pts[ind_left, 1] - kp_right_pts[ind_right, 1]) < 2
+        good_map2 = kp_left_pts[ind_left, 0] > kp_right_pts[ind_right, 0]
+        # good_map2 = good_map1
+        if good_map1 and good_map2:
+            inliers.append(match)
+        else:
+            outliers.append(match)
+
+    return inliers, outliers
+
 
 
 def rodriguez_to_mat(rvec, tvec):
@@ -113,6 +167,8 @@ def find_concensus_points_and_idx2(good_matches_lr_0, matches_l0_l1, good_matche
     matches = []
     # good_idx_l0 = [good_matches_lr_0[i].queryIdx for i in range(len(good_matches_lr_0))]
     # good_idx_l1 = [good_matches_lr1[i].queryIdx for i in range(len(good_matches_lr1))]
+
+
     for i in range(len(good_matches_lr_0)):
         match = good_matches_lr_0[i]
         for j in range(len(matches_l0_l1)):
@@ -241,10 +297,16 @@ def perform_tracking2(first_indx):
 
 
 def extract_matches_from_images(img_0, img1):
-    kp0, desc0 = FEATURE.detectAndCompute(img_0, None)
-    kp1, desc1 = FEATURE.detectAndCompute(img1, None)
+    kp0 = FEATURE.detect(img_0)
+    kp1 = FEATURE.detect(img1)
+    desc0 = FEATURE.compute(img_0, kp0)[1]
+    desc1 = FEATURE.compute(img1, kp1)[1]
     matches = MATCHER.match(desc0, desc1)
-    return kp0, kp1, matches
+    return kp0,kp1,matches
+    # kp0, desc0 = FEATURE.detectAndCompute(img_0)
+    # kp1, desc1 = FEATURE.detectAndCompute(img1, None)
+    # matches = MATCHER.match(desc0, desc1)
+    # return kp0, kp1, matches
 
 
 def calculate_4_camera_locations(T: np.array):
@@ -305,21 +367,43 @@ def plot_points_on_img1_img2(idx, not_idx, matches, img1, img2, kp_l0, kp_l1):
 #                         matches.append((good_matches_lr_0[i0], good_matches_lr1[i1]))
 #     return np.array(con), np.array(matches)
 
-
 def find_concensus_points_and_idx(good_matches_lr_0, matches_l0_l1, good_matches_lr1):
+    # Create dictionaries for quick lookup
+    dict_lr_0 = {match.queryIdx: i for i, match in enumerate(good_matches_lr_0)}
+    dict_lr_1 = {match.queryIdx: i for i, match in enumerate(good_matches_lr1)}
+
     con = []
     matches = []
+
     for match_l_l in matches_l0_l1:
         kp_ll_0 = match_l_l.queryIdx
         kp_ll_1 = match_l_l.trainIdx
-        for i0 in range(len(good_matches_lr_0)):
-            if kp_ll_0 == good_matches_lr_0[i0].queryIdx:
-                for i1 in range(len(good_matches_lr1)):
-                    if kp_ll_1 == good_matches_lr1[i1].queryIdx:
-                        con.append((i0, i1))
-                        matches.append((good_matches_lr_0[i0], good_matches_lr1[i1]))
-                        break
+
+        # Check if the match exists in both dictionaries
+        if kp_ll_0 in dict_lr_0 and kp_ll_1 in dict_lr_1:
+            i0 = dict_lr_0[kp_ll_0]
+            i1 = dict_lr_1[kp_ll_1]
+            con.append((i0, i1))
+            matches.append((good_matches_lr_0[i0], good_matches_lr1[i1]))
+
     return np.array(con), np.array(matches)
+
+# def find_concensus_points_and_idx(good_matches_lr_0, matches_l0_l1, good_matches_lr1):
+#     con = []
+#     matches = []
+#     for match_l_l in matches_l0_l1:
+#         kp_ll_0 = match_l_l.queryIdx
+#         kp_ll_1 = match_l_l.trainIdx
+#         for i0 in range(len(good_matches_lr_0)):
+#             if kp_ll_0 == good_matches_lr_0[i0].queryIdx:
+#                 for i1 in range(len(good_matches_lr1)):
+#                     if kp_ll_1 == good_matches_lr1[i1].queryIdx:
+#                         con.append((i0, i1))
+#                         matches.append((good_matches_lr_0[i0], good_matches_lr1[i1]))
+#                         break
+#     return np.array(con), np.array(matches)
+
+
 
 
 def check_transform_agreed(T, matches_3d_l0, consensus_matches, kp_l_first, kp_r_first, kp_l_second, kp_r_second):
@@ -330,7 +414,7 @@ def check_transform_agreed(T, matches_3d_l0, consensus_matches, kp_l_first, kp_r
     real_l_1_pix_val, real_r_1_pix_val = extract_y_values(consensus_matches[:, 1], kp_l_second, kp_r_second)
     ones = np.ones((matches_3d_l0.shape[0], 1))
     matches_in_4d = np.hstack((matches_3d_l0, ones)).T
-    # print(M1)
+
 
     # 3d points to first camera coordinate system
     pts3d_to_l0 = (M1 @ matches_in_4d)
@@ -342,13 +426,13 @@ def check_transform_agreed(T, matches_3d_l0, consensus_matches, kp_l_first, kp_r
     pix_values_l_0 = pix_values_l_0 / pix_values_l_0[:, 2][:, np.newaxis]
     pix_values_l_0_y = pix_values_l_0[:, 1]
     agrees_l0 = np.abs(real_l_0_pix_val - pix_values_l_0_y) < 2
-    # print('agrees_l0', np.sum(agrees_l0) == len(agrees_l0))
+
 
     pix_values_r_0 = (K @ pts3d_to_r0).T
     pix_values_r_0 = pix_values_r_0 / pix_values_r_0[:, 2][:, np.newaxis]
     pix_values_r_0_y = pix_values_r_0[:, 1]
     agrees_r0 = np.abs(real_r_0_pix_val - pix_values_r_0_y) < 2
-    # print('agrees_l0', np.sum(agrees_r0) == len(agrees_r0))
+
 
     # to_4d = np.hstack((pts3d_to_l0.T, ones)).T
     l1_pts = (T @ matches_in_4d)
@@ -356,7 +440,7 @@ def check_transform_agreed(T, matches_3d_l0, consensus_matches, kp_l_first, kp_r
     pix_values_l_1 = pix_values_l_1 / pix_values_l_1[:, 2][:, np.newaxis]
     pix_values_l_1_y = pix_values_l_1[:, 1]
     agrees_l1 = np.abs(real_l_1_pix_val - pix_values_l_1_y) < 2
-    # print('agrees_l1', np.sum(agrees_l1) == len(agrees_l1))
+
 
     to_4d = np.hstack((l1_pts.T, ones)).T
     pix_values_r_1 = (K @ M2 @ to_4d).T
@@ -366,8 +450,6 @@ def check_transform_agreed(T, matches_3d_l0, consensus_matches, kp_l_first, kp_r
 
     # agree_all = np.logical_and(agrees_l0 , agrees_r0 , agrees_l1 , agrees_r1)
     agree_all = agrees_l0 & agrees_l1 & agrees_r0 & agrees_r1
-    # print('agrees_l0', np.sum(agree_all))
-    # print(agree_all.shape)
     # points = np.where(agree_all)
     # return points
     return agree_all
@@ -447,7 +529,7 @@ def check_transform_agreed(T, matches_3d_l0, consensus_matches, kp_l_first, kp_r
 #         real_pr0_y = kp_r_first[consensus_matches[i, 0].trainIdx].pt[1]
 #         real_pl1_y = kp_l_second[consensus_matches[i, 1].queryIdx].pt[1]
 #         real_pr1_y = kp_r_second[consensus_matches[i, 1].trainIdx].pt[1]
-#         # print(f"real y :{real_pl0_y}, {real_pr0_y}, {real_pl1_y}, {real_pr1_y}")
+
 #         #
 #         # if abs(pl0_y - real_pl0_y) > 2 or abs(pr0_y - real_pr0_y) > 2 or abs(pl1_y - real_pl1_y) > 2 or abs(
 #         #         pr1_y - real_pr1_y) > 2:
@@ -531,7 +613,7 @@ def transformation_agreement(T, consensus_matches, points_3d, kp_l0, kp_r0, kp_l
     # real_y = real_y_values[:, 0]
     # agree_l0 = np.abs(transform_to_l0_points[:, 1] - real_y) < 2
     # if np.sum(agree_l0) != len(agree_l0):
-    #     print("some_pt disagree with l0")
+
 
     transform_to_r0_points = (to_the_right @ points_4d).T
     transform_to_r0_points = transform_to_r0_points / transform_to_r0_points[:, 2][:, np.newaxis]
@@ -557,16 +639,7 @@ def transformation_agreement(T, consensus_matches, points_3d, kp_l0, kp_r0, kp_l
     real_y = real_y_values[:, 3]
     agree_r1 = np.abs(transformed_to_r1_points[:, 1] - real_y) < 2
 
-    # l0_T = K @ M1
-
-    # if np.sum(agree_r0) == len(agree_r0):
-    #     print("All agree with r0")
-    # else:
-    #     print("Some points do not agree with r0")
     return np.logical_and(agree_l1, agree_r1, agree_r0)
-    # return np.logical_and(np.logical_and(agree_l1, agree_r1, agree_r0), agree_l0)
-
-    # return np.logical_and(agree_l1, agree_r1)
 
 
 def ransac_pnp(inliers_traingulated_pts, best_matches_pairs, kp_l_0, kp_r_0, kp_l_1, kp_r_1):
@@ -575,15 +648,16 @@ def ransac_pnp(inliers_traingulated_pts, best_matches_pairs, kp_l_0, kp_r_0, kp_
     best_T = None
     best_matches_idx = None
     diff_coeff = np.zeros((5, 1))
-
+    points_pixel_values = np.array([kp_l_1[m[1].queryIdx].pt for m in best_matches_pairs])
     for i in range(RANSAC_ITERATIONS):
         # Randomly select 4 points in the world coordinate system
         random_idx = np.random.choice(len(inliers_traingulated_pts), 4, replace=False)
         random_world_points = inliers_traingulated_pts[random_idx]
-        random_matches = best_matches_pairs[random_idx]
+        # random_matches = best_matches_pairs[random_idx]
         # Get the corresponding pixel values in l1
-        random_points_pixel_values = np.array([kp_l_1[m[1].queryIdx].pt for m in random_matches])
-        # print(random_points_pixel_values)
+        # random_points_pixel_values = np.array([kp_l_1[m[1].queryIdx].pt for m in random_matches])
+        random_points_pixel_values = points_pixel_values[random_idx]
+
 
         # solve PnP problem to get the transformation
         success, rotation_vector, translation_vector = cv2.solvePnP(random_world_points, random_points_pixel_values, K,
@@ -600,11 +674,11 @@ def ransac_pnp(inliers_traingulated_pts, best_matches_pairs, kp_l_0, kp_r_0, kp_
                                                  kp_l_1, kp_r_1)
 
         inliers_idx = np.where(points_agreed == True)
-        # inliers = relevant_3d_pts[inliers_idx]
         if np.sum(points_agreed) > best_inliers:
             best_inliers = np.sum(points_agreed)
             best_T = T
             best_matches_idx = inliers_idx
+
     return best_T, best_matches_idx
 
 
@@ -612,15 +686,13 @@ def find_best_transformation(traingulated_pts, matches, kp_l_first, kp_r_first, 
     """ Find the best transformation using RANSAC"""
     T, inliers_idx = ransac_pnp(traingulated_pts, matches, kp_l_first, kp_r_first, kp_l_second,
                                 kp_r_second)
+
     # return T, inliers_idx
-    # if T is None:
-    #     print("No transformation found")
-    #     return None
+
 
     # return T,inliers_idx
     # relevant_3d_pts = traingulated_pts[matches_idx[:, 0]][inliers_idx]
     # relevant_3d_pts = relevant_3d_pts[inliers_idx]
-    # print(len(inliers_idx[0]))
     best_matches = matches[inliers_idx[0]]
     img_pts = np.array([kp_l_second[m[1].queryIdx].pt for m in best_matches])
     diff_coeff = np.zeros((5, 1))
@@ -628,7 +700,6 @@ def find_best_transformation(traingulated_pts, matches, kp_l_first, kp_r_first, 
     success, rotation_vector, translation_vector = cv2.solvePnP(pt_3d, img_pts, K,
                                                                 distCoeffs=diff_coeff, flags=cv2.SOLVEPNP_EPNP)
     if success:
-        # print(inliers_idx)
         return rodriguez_to_mat(rotation_vector, translation_vector), inliers_idx[0]
     return None
 
@@ -638,56 +709,41 @@ def perform_tracking(first_indx):
 
     img_l_0, img_r_0 = ex2.read_images(first_indx)
     kp_l_0, kp_r_0, desc_l_0, desc_r_0, matches_f_0 = extract_kps_descs_matches(img_l_0, img_r_0)
-    print(len(desc_l_0))
-    in_f_0, out_f_0 = ex2.extract_inliers_outliers(kp_l_0, kp_r_0, matches_f_0)
+    # in_f_0, out_f_0 = ex2.extract_inliers_outliers(kp_l_0, kp_r_0, matches_f_0)
+    in_f_0, out_f_0 = extract_inliers_outliers(kp_l_0, kp_r_0, matches_f_0)
     in_f_0 = np.array(in_f_0)
 
-    for i in tqdm(range(first_indx + 1, LEN_DATA_SET)):
+    for i in range(first_indx + 1, LEN_DATA_SET):
+        if i%10 == 0:
+            print(f" frame {i} is being processed")
         # load the next frames and extract the keypoints and descriptors
         img_l_1, img_r_1 = ex2.read_images(i)
         kp_l_1, kp_r_1, desc_l_1, desc_r_1, matches_f_1 = extract_kps_descs_matches(img_l_1, img_r_1)
 
         # extract the inliers and outliers and triangulate the points
 
-        in_f_1, out_f_1 = ex2.extract_inliers_outliers(kp_l_1, kp_r_1, matches_f_1)
-
+        in_f_1, out_f_1 = extract_inliers_outliers(kp_l_1, kp_r_1, matches_f_1)
         in_f_1 = np.array(in_f_1)
-        # print(len(in_f_0))
-        # relevent_desc_idx_l_0 = [m.queryIdx for m in in_f_0]
-        # relevent_desc_idx_l_1 = [m.queryIdx for m in in_f_1]
-
-        # p = desc_l_0[relevent_desc_idx_l_0]
 
         # extract matches of first left frame and the second left frame
-        # matches_l_l = ex2.MATCHER.radiusMatch(desc_l_0, desc_l_1, maxDistance=20)
-        # matches_l_l = [m if len(m) >= 1 for m in matches_l_l]
-        # matches_l_l = np.array(matches_l_l)
         matches_l_l = MATCHER.match(desc_l_0, desc_l_1)
-
-        matches_l_l = sorted(matches_l_l, key=lambda x: x.distance)
-        # matches_len = len(matches_l_l)
-        if len(matches_l_l) > 300:
-            matches_l_l = matches_l_l[:300]
-        # for m in matches_l_l:
-        #     print(m.distance)
-
+        matches_l_l = sorted(matches_l_l, key=lambda x: x.distance)[:300]
         # find the concensus matches
         # good matches idx is np.array. each element is a tuple (i0,i1)
         # where i0 is the index of the match in in_f_0 and i1 is the index of the match in in_f_1
         good_matches_idx, matches_pairs = find_concensus_points_and_idx(in_f_0, matches_l_l, in_f_1)
-        # print(f"good matches: {len(good_matches_idx)}, len in0,{len(in_f_0)}, in1 {len(in_f_1)} matches: {len(matches_l_l)}")
+
         # triangulate the points only the good matches points from in_f_0
+        # start = timer()
         l_0_best_inliers_idx = good_matches_idx[:, 0]
         l_0_best_inliers = in_f_0[l_0_best_inliers_idx]
-        # p = global_transformations[-1] if len(global_transformations) > 0 else M1
-        # q = M2 @ np.vstack((p, np.array([0, 0, 0, 1])))
         traingulated_pts = ex2.cv_triangulate_matched_points(l_0_best_inliers, kp_l_0, kp_r_0, P, Q)
 
         # find the best transformation
         relative_transformation, idx = find_best_transformation(traingulated_pts, matches_pairs, kp_l_0, kp_r_0, kp_l_1,
                                                                 kp_r_1)
-        # print(f"iteration: {i}, num inliers {len(idx)}, total matches {len(matches_pairs)}, total matches {matches_len}")
-
+        # end = timer()
+        # print(f"Triangulation time: {end - start}")
         # calculate the global transformation
         # global_trasnform = relative_transformation
         last_transformation = global_transformations[-1] if len(global_transformations) > 0 else M1
@@ -695,14 +751,9 @@ def perform_tracking(first_indx):
         global_transformations.append(global_trasnform)
 
         # update the keypoints, descriptors and matches
-        # relevent_desc_idx_l_1 = [m.queryIdx for m in in_f_1]
-        # relevant_kp_l1 = [kp_l_0[m.queryIdx] for m in in_f_1]
-
-        # relevant_desc_l1 = np.array([desc_l_1[m.queryIdx] for m in in_f_1])
         kp_l_0, kp_r_0 = kp_l_1, kp_r_1
-        # desc_l_0 = relevant_desc_l1
         desc_l_0 = desc_l_1
-        # matches_f_0 = matches_f_1
+        matches_f_0 = matches_f_1
         in_f_0 = in_f_1
     return global_transformations
 
@@ -857,16 +908,6 @@ def q3_6():
     transformations2 = read_extrinsic_matrices(n=LEN_DATA_SET)
     camera_location = calculate_camera_locations(transformations)
     ground_truth_location = calculate_camera_locations(transformations2)
-    # camera_location = np.array([0, 0, 0])
-    # ground_truth_location = np.array([0, 0, 0])
-
-    # for T_real, T in zip(transformations2, transformations):
-    #     R = T[:, :3]
-    #     t = T[:, 3:]
-    #     camera_location = np.vstack((camera_location, (-R.transpose() @ t).reshape((3))))
-    #     R = T_real[:, :3]
-    #     t = T_real[:, 3:]
-    #     ground_truth_location = np.vstack((ground_truth_location, (-R.transpose() @ t).reshape((3))))
 
     x_coords = camera_location[:, 0]
     realx = ground_truth_location[:, 0]
@@ -910,7 +951,5 @@ if __name__ == '__main__':
     # plot_points_on_img1_img2(ind, not_ind, matches_0, img_l_0, img_l_1, kp_l_0, kp_l_1)
     # T, inliers_idx = q3_5(idx, match, relevant_triangulated, kp_l_0, kp_r_0, kp_l_1, kp_r_1)
     # for i in tqdm(range(1,LEN_DATA_SET - 1)):
-    #     print(i)
 
     loc, _ = q3_6()
-    # print(loc)
