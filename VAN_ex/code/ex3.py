@@ -4,6 +4,8 @@ import random
 import matplotlib.pyplot as plt
 import os
 import numpy as np
+from tqdm import tqdm
+from timeit import default_timer as timer
 
 MAC = True
 if MAC:
@@ -12,15 +14,15 @@ if MAC:
 else:
     DATA_PATH = r'...\VAN_ex\dataset\sequences\00\\'
 
-
 SEC_PROB = 0.99
 OUTLIER_PROB = 0.6
 MIN_SET_SIZE = 4
-RANSAC_ITERATIONS = int(np.log(1 - SEC_PROB) / np.log(1 - np.power(1 - OUTLIER_PROB, MIN_SET_SIZE))) + 1
-print(RANSAC_ITERATIONS)
+# RANSAC_ITERATIONS = int(np.log(1 - SEC_PROB) / np.log(1 - np.power(1 - OUTLIER_PROB, MIN_SET_SIZE))) + 1
+# print(RANSAC_ITERATIONS)
+RANSAC_ITERATIONS = 36
 
 LEN_DATA_SET = len(os.listdir(DATA_PATH + 'image_0'))
-LEN_DATA_SET = 250
+LEN_DATA_SET = 500
 
 GROUND_TRUTH_PATH = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/dataset/poses/00.txt"
 
@@ -414,8 +416,63 @@ def check_transform_agreed(T, matches_3d_l0, consensus_matches, kp_l_first, kp_r
 #
 #     return np.array(idx)
 
+def transformation_agreement(T, consensus_matches, points_3d, kp_l0, kp_r0, kp_l1, kp_r1):
+    T_4x4 = np.vstack((T, np.array([0, 0, 0, 1])))
+    points_4d = np.hstack((points_3d, np.ones((points_3d.shape[0], 1)))).T
+    l1_T = K @ T
+    l1_4d_points = (T_4x4 @ points_4d)
+    to_the_right = (K @ M2)
 
-def ransac_pnp(inliers_traingulated_pts ,best_matches_pairs, kp_l_0, kp_r_0, kp_l_1, kp_r_1):
+    real_y_values = np.array([[kp_l0[m[0].queryIdx].pt[1],
+                               kp_r0[m[0].trainIdx].pt[1],
+                               kp_l1[m[1].queryIdx].pt[1],
+                               kp_r1[m[1].trainIdx].pt[1],
+                               ] for m in consensus_matches])
+
+    transform_to_l0_points = (P @ points_4d).T
+    transform_to_l0_points = transform_to_l0_points / transform_to_l0_points[:, 2][:, np.newaxis]
+    # transform_y_values = transform_to_l0_points[:, 1]
+    # real_y_values = np.array([kpr0[m[0].trainIdx].pt[1] for m in consensus_matches])
+    real_y = real_y_values[:, 0]
+    agree_l0 = np.abs(transform_to_l0_points[:, 1] - real_y) < 2
+
+    transform_to_r0_points = (to_the_right @ points_4d).T
+    transform_to_r0_points = transform_to_r0_points / transform_to_r0_points[:, 2][:, np.newaxis]
+    # transform_y_values = transform_to_r0_points[:, 1]
+    # real_y_values = np.array([kpr0[m[0].trainIdx].pt[1] for m in consensus_matches])
+    real_y = real_y_values[:, 1]
+    agree_r0 = np.abs(transform_to_r0_points[:, 1] - real_y) < 2
+
+    # transformed_to_l1_points = (l1_T @ points_4d).T
+    transformed_to_l1_points = (K @ l1_4d_points[:3, :]).T
+    transformed_to_l1_points = transformed_to_l1_points / transformed_to_l1_points[:, 2][:, np.newaxis]
+    # transform_y_values = transformed_to_l1_points[:, 1]
+    # real_y_values = np.array([kpl1[m[1].queryIdx].pt[1] for m in consensus_matches])
+    real_y = real_y_values[:, 2]
+    agree_l1 = np.abs(transformed_to_l1_points[:, 1] - real_y) < 2
+
+    # r1_T = K @ M2 @ (np.vstack((T, np.array([0, 0, 0, 1]))))
+    # transformed_to_r1_points = (r1_T @ points_4d).T
+    transformed_to_r1_points = (to_the_right @ l1_4d_points).T
+    transformed_to_r1_points = transformed_to_r1_points / transformed_to_r1_points[:, 2][:, np.newaxis]
+    # transform_y_values = transformed_to_r1_points[:, 1]
+    # real_y_values = np.array([kpr1[m[1].trainIdx].pt[1] for m in consensus_matches])
+    real_y = real_y_values[:, 3]
+    agree_r1 = np.abs(transformed_to_r1_points[:, 1] - real_y) < 2
+
+    # l0_T = K @ M1
+
+    # if np.sum(agree_r0) == len(agree_r0):
+    #     print("All agree with r0")
+    # else:
+    #     print("Some points do not agree with r0")
+
+    return np.logical_and(np.logical_and(agree_l1, agree_r1, agree_r0), agree_l0)
+
+    # return np.logical_and(agree_l1, agree_r1)
+
+
+def ransac_pnp(inliers_traingulated_pts, best_matches_pairs, kp_l_0, kp_r_0, kp_l_1, kp_r_1):
     """ Perform RANSAC to find the best transformation"""
     best_inliers = 0
     best_T = None
@@ -438,10 +495,12 @@ def ransac_pnp(inliers_traingulated_pts ,best_matches_pairs, kp_l_0, kp_r_0, kp_
             T = rodriguez_to_mat(rotation_vector, translation_vector)
         else:
             continue
-        points_agreed = check_transform_agreed(T, inliers_traingulated_pts, best_matches_pairs, kp_l_0,
-                                               kp_r_0,
-                                               kp_l_1,
-                                               kp_r_1)
+        # points_agreed = check_transform_agreed(T, inliers_traingulated_pts, best_matches_pairs, kp_l_0,
+        #                                        kp_r_0,
+        #                                        kp_l_1,
+        #                                        kp_r_1)
+        points_agreed = transformation_agreement(T, best_matches_pairs, inliers_traingulated_pts, kp_l_0, kp_r_0,
+                                                 kp_l_1, kp_r_1)
 
         inliers_idx = np.where(points_agreed == True)
         # inliers = relevant_3d_pts[inliers_idx]
@@ -521,7 +580,7 @@ def perform_tracking(first_indx):
     kp_l_0, kp_r_0, desc_l_0, desc_r_0, matches_f_0 = extract_kps_descs_matches(img_l_0, img_r_0)
     in_f_0, out_f_0 = ex2.extract_inliers_outliers(kp_l_0, kp_r_0, matches_f_0)
 
-    for i in range(first_indx + 1, LEN_DATA_SET):
+    for i in tqdm(range(first_indx + 1, LEN_DATA_SET)):
         # load the next frames and extract the keypoints and descriptors
         img_l_1, img_r_1 = ex2.read_images(i)
         kp_l_1, kp_r_1, desc_l_1, desc_r_1, matches_f_1 = extract_kps_descs_matches(img_l_1, img_r_1)
@@ -538,10 +597,10 @@ def perform_tracking(first_indx):
         # matches_l_l = [m if len(m) >= 1 for m in matches_l_l]
         # matches_l_l = np.array(matches_l_l)
         matches_l_l = ex2.MATCHER.match(desc_l_0, desc_l_1)
-        matches_l_l = sorted(matches_l_l, key=lambda x: x.distance)
-        matches_len = len(matches_l_l)
-        if matches_len > 200:
-            matches_l_l = matches_l_l[:matches_len// 2]
+        # matches_l_l = sorted(matches_l_l, key=lambda x: x.distance)
+        # matches_len = len(matches_l_l)
+        # if matches_len > 200:
+        #     matches_l_l = matches_l_l[:matches_len// 2]
         # for m in matches_l_l:
         #     print(m.distance)
 
@@ -555,11 +614,12 @@ def perform_tracking(first_indx):
         l_0_best_inliers = in_f_0[l_0_best_inliers_idx]
         # p = global_transformations[-1] if len(global_transformations) > 0 else M1
         # q = M2 @ np.vstack((p, np.array([0, 0, 0, 1])))
-        traingulated_pts = ex2.cv_triangulate_matched_points(l_0_best_inliers, kp_l_0, kp_r_0,P, Q)
+        traingulated_pts = ex2.cv_triangulate_matched_points(l_0_best_inliers, kp_l_0, kp_r_0, P, Q)
 
         # find the best transformation
         relative_transformation, idx = find_best_transformation(traingulated_pts, matches_pairs, kp_l_0, kp_r_0, kp_l_1,
                                                                 kp_r_1)
+        # print(f"iteration: {i}, num inliers {len(idx)}, total matches {len(matches_pairs)}")
 
         # calculate the global transformation
         # global_trasnform = relative_transformation
@@ -572,8 +632,6 @@ def perform_tracking(first_indx):
         desc_l_0, desc_r_0 = desc_l_1, desc_r_1
         # matches_f_0 = matches_f_1
         in_f_0 = in_f_1
-
-
     return global_transformations
 
 
@@ -757,7 +815,12 @@ def q3_5(matches_idx, matches, traingulated_pts, kp_l_first, kp_r_first, kp_l_se
 
 
 def q3_6():
+    start = timer()
     transformations = perform_tracking(0)
+    end = timer()
+    minutes = (end - start) // 60
+    seconds = (end - start) % 60
+    print(f"Time taken to perform tracking: {minutes} minutes and {seconds} seconds")
     transformations2 = read_extrinsic_matrices(n=LEN_DATA_SET)
     loc = np.array([0, 0, 0])
     real_loc = np.array([0, 0, 0])
@@ -810,5 +873,8 @@ if __name__ == '__main__':
     # ind, not_ind = q3_4(idx, match, triangulated_pts_0, t, kp_l_0, kp_r_0, kp_l_1, kp_r_1)
     # plot_points_on_img1_img2(ind, not_ind, matches_0, img_l_0, img_l_1, kp_l_0, kp_l_1)
     # T, inliers_idx = q3_5(idx, match, relevant_triangulated, kp_l_0, kp_r_0, kp_l_1, kp_r_1)
-    loc, _=q3_6()
-    print(loc)
+    # for i in tqdm(range(1,LEN_DATA_SET - 1)):
+    #     print(i)
+
+    loc, _ = q3_6()
+    # print(loc)
