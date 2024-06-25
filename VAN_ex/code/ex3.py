@@ -22,14 +22,16 @@ MIN_SET_SIZE = 4
 RANSAC_ITERATIONS = 100
 
 LEN_DATA_SET = len(os.listdir(DATA_PATH + 'image_0'))
-# LEN_DATA_SET = 500
+LEN_DATA_SET = 500
 
 GROUND_TRUTH_PATH = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/dataset/poses/00.txt"
 
 # index_params = dict(algorithm=0, trees=20)
 # search_params = dict(checks=150)
 # MATCHER = cv2.FlannBasedMatcher(index_params, search_params)
-MATCHER = ex2.MATCHER
+MAX_FEATURES = 1000
+FEATURE = cv2.SIFT_create(MAX_FEATURES)
+MATCHER = cv2.BFMatcher(normType=cv2.NORM_L2, crossCheck=True)
 
 
 def read_cameras():
@@ -82,8 +84,8 @@ def read_extrinsic_matrices(file_path=GROUND_TRUTH_PATH, n=LEN_DATA_SET):
 
 
 def extract_kps_descs_matches(img_0, img1):
-    kp0, desc0 = ex2.FEATURE.detectAndCompute(img_0, None)
-    kp1, desc1 = ex2.FEATURE.detectAndCompute(img1, None)
+    kp0, desc0 = FEATURE.detectAndCompute(img_0, None)
+    kp1, desc1 = FEATURE.detectAndCompute(img1, None)
     matches = MATCHER.match(desc0, desc1)
     return kp0, kp1, desc0, desc1, matches
 
@@ -239,8 +241,8 @@ def perform_tracking2(first_indx):
 
 
 def extract_matches_from_images(img_0, img1):
-    kp0, desc0 = ex2.FEATURE.detectAndCompute(img_0, None)
-    kp1, desc1 = ex2.FEATURE.detectAndCompute(img1, None)
+    kp0, desc0 = FEATURE.detectAndCompute(img_0, None)
+    kp1, desc1 = FEATURE.detectAndCompute(img1, None)
     matches = MATCHER.match(desc0, desc1)
     return kp0, kp1, matches
 
@@ -505,6 +507,7 @@ def check_transform_agreed(T, matches_3d_l0, consensus_matches, kp_l_first, kp_r
 #     idx = agree_all == True
 #
 #     return np.array(idx)
+
 
 def transformation_agreement(T, consensus_matches, points_3d, kp_l0, kp_r0, kp_l1, kp_r1):
 
