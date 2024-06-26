@@ -6,7 +6,6 @@ import os
 import numpy as np
 from tqdm import tqdm
 from timeit import default_timer as timer
-
 MAC = True
 if MAC:
     DATA_PATH = '/Users/mac/67604-SLAM-video-navigation/VAN_ex/dataset/sequences/00/'
@@ -14,8 +13,8 @@ if MAC:
 else:
     DATA_PATH = r'...\VAN_ex\dataset\sequences\00\\'
 
-SEC_PROB = 0.9999
-OUTLIER_PROB = 0.42
+SEC_PROB = 0.999999
+OUTLIER_PROB = 0.45
 MIN_SET_SIZE = 4
 RANSAC_ITERATIONS = int(np.log(1 - SEC_PROB) / np.log(1 - np.power(1 - OUTLIER_PROB, MIN_SET_SIZE))) + 1
 
@@ -27,7 +26,6 @@ LEN_DATA_SET = len(os.listdir(DATA_PATH + 'image_0'))
 GROUND_TRUTH_PATH = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/dataset/poses/00.txt"
 
 FEATURE = cv2.AKAZE_create()
-print(FEATURE.getThreshold())
 FEATURE.setThreshold(0.003)
 MATCHER = cv2.BFMatcher(normType=cv2.NORM_L2, crossCheck=True)
 
@@ -367,8 +365,6 @@ def transformation_agreement(T, consensus_matches, points_3d, kp_l0, kp_r0, kp_l
     agree_1 = np.logical_and(agree_r1, cond_x, agree_l1)
     return np.logical_and(agree_0, agree_1)
 
-    return np.logical_and(agree_l1, agree_r1, agree_r0)
-    # return np.logical_and(np.logical_and(agree_l1, agree_r1, agree_r0),agree_l0)
 
 
 def ransac_pnp(inliers_traingulated_pts, best_matches_pairs, kp_l_0, kp_r_0, kp_l_1, kp_r_1):
@@ -551,8 +547,8 @@ def q3_4(T, match, inliers_traingulated_pts, kp_l_first, kp_r_first, kp_l_second
     """ check which points are consistent with the transformation T"""
     supporters_idx = transformation_agreement(T, match, inliers_traingulated_pts, kp_l_first, kp_r_first, kp_l_second,
                                              kp_r_second, x_condition=False)
-    supporters_idx = np.where(supporters_idx)
-    not_supporters_idx = np.where(~supporters_idx)
+    supporters_idx = np.where(supporters_idx)[0]
+    not_supporters_idx = np.where(~supporters_idx)[0]
     # agreed_points = inliers_traingulated_pts[idx]
     # disagreed_points = inliers_traingulated_pts[~agreed_matrix]
     print(f"Number of points that agree with the transformation: {len(supporters_idx)}")
@@ -561,81 +557,111 @@ def q3_4(T, match, inliers_traingulated_pts, kp_l_first, kp_r_first, kp_l_second
 
 
     # plot on images left0 and left1 the matches, with supporters in different color.
-    l0_supporters = [kp_l_first[match[i].queryIdx].pt for i in supporters_idx]
-    l0_not_supporters = [kp_l_first[match[i].queryIdx].pt for i in not_supporters_idx]
+    l0_supporters = [kp_l_first[match[i,0].queryIdx].pt for i in supporters_idx]
+    l0_not_supporters = [kp_l_first[match[i,0].queryIdx].pt for i in not_supporters_idx]
 
-    l1_supporters = [kp_l_second[match[i].trainIdx].pt for i in supporters_idx]
-    l1_not_supporters = [kp_l_second[match[i].trainIdx].pt for i in not_supporters_idx]
+    l1_supporters = [kp_l_second[match[i,1].queryIdx].pt for i in supporters_idx]
+    l1_not_supporters = [kp_l_second[match[i,0].queryIdx].pt for i in not_supporters_idx]
 
     plt.figure()
     plt.subplot(2, 1, 1)
     plt.imshow(img_l0, cmap='gray')
-    plt.scatter([m[0] for m in l0_supporters], [m[1] for m in l0_supporters], c='r', s=8)
-    plt.scatter([m[0] for m in l0_not_supporters], [m[1] for m in l0_not_supporters], c='b', s=5)
-    plt.title('left0: Points that agree with the transformation in red, disagree in blue')
+    plt.scatter([m[0] for m in l0_supporters], [m[1] for m in l0_supporters], c='r', s=2)
+    plt.scatter([m[0] for m in l0_not_supporters], [m[1] for m in l0_not_supporters], c='b', s=2)
+    plt.title('Q3.4: left_0, transformation supporters in red, other in blue')
     plt.subplot(2, 1, 2)
     plt.imshow(img_l1, cmap='gray')
-    plt.scatter([m[0] for m in l1_supporters], [m[1] for m in l1_supporters], c='r', s=8)
-    plt.scatter([m[0] for m in l1_not_supporters], [m[1] for m in l1_not_supporters], c='b', s=5)
-    plt.title('left1: Points that agree with the transformation in red, disagree in blue')
+    plt.scatter([m[0] for m in l1_supporters], [m[1] for m in l1_supporters], c='r', s=2)
+    plt.scatter([m[0] for m in l1_not_supporters], [m[1] for m in l1_not_supporters], c='b', s=2)
+    plt.title('Q3.4: left_1, transformation supporters in red, other in blue')
     # plt.show()
 
     return supporters_idx, not_supporters_idx
 
 
-def q3_5(matches_idx, matches, traingulated_pts, kp_l_first, kp_r_first, kp_l_second, kp_r_second):
-    T, best_idx = find_best_transformation(matches, matches_idx, traingulated_pts, kp_l_first, kp_r_first, kp_l_second,
-                                           kp_r_second, M1)
+def q3_5(matches, traingulated_pts, kp_l_first, kp_r_first, kp_l_second, kp_r_second):
+
+    T, best_idx = find_best_transformation(traingulated_pts, matches, kp_l_first, kp_r_first, kp_l_second,
+                                           kp_r_second)
 
     transformed_pair0 = T @ (np.hstack((triangulated_pts_0, np.ones((triangulated_pts_0.shape[0], 1))))).T
     transformed_pair0 = transformed_pair0.T
     pair1 = triangulated_pts_1
-    # Plotting
+
+
+    # Plotting the 3d point cloud
+    x1, y1, z1 = transformed_pair0[:, 0], transformed_pair0[:, 1], transformed_pair0[:, 2]
+    x2, y2, z2 = pair1[:, 0], pair1[:, 1], pair1[:, 2]
+    fig = plt.figure()
+    ax = fig.add_subplot(projection='3d')
+    s1 = ax.scatter3D(x1, y1, z1, color='r', s=2)
+    s2 = ax.scatter3D(x2, y2, z2, color='b', s=1.5)
+    title1 = 'Q3.5: 3D Points from Pair 0 After Transformation (red) Pair 1 (Blue)'
+    ax.set_title(title1)
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.set_zlabel('z')
+    ax.set_xlim(-25, 25)
+    ax.set_ylim(-25, 25)
+    ax.set_zlim(-50, 300)
+
+    inlier_idx = np.where(best_idx)[0]
+
+    outlayer_idx = np.where(best_idx == 0)[0]
+
+    inliers_0 = [kp_l_first[matches[i, 0].queryIdx].pt for i in inlier_idx]
+    outlayers_0 = [kp_l_first[matches[i, 0].queryIdx].pt for i in outlayer_idx]
+
+    inliers_1 = [kp_l_second[matches[i, 1].queryIdx].pt for i in inlier_idx]
+    outlayers_1 = [kp_l_second[matches[i, 1].queryIdx].pt for i in outlayer_idx]
+
+    #plot on images left0 and left1 the inliers and outliers in different colors.
+
     plt.figure(figsize=(8, 6))
-
-    # Extract X and Z coordinates for pair 0 after transformation
-    x_coords_transformed = transformed_pair0[:, 0]
-    z_coords_transformed = transformed_pair0[:, 2]
-
-    # Extract X and Z coordinates for pair 1
-    x_coords_pair1 = pair1[:, 0]
-    z_coords_pair1 = pair1[:, 2]
-
-    # Scatter plot for pair 0 after transformation (in blue)
-    plt.scatter(x_coords_transformed, z_coords_transformed, color='blue', label='Pair 0 (transformed)')
-
-    # Scatter plot for pair 1 (in orange)
-    plt.scatter(x_coords_pair1, z_coords_pair1, color='orange', label='Pair 1')
-
-    # Adding labels and title
-    plt.xlabel('X Coordinate')
-    plt.ylabel('Z Coordinate')
-    plt.title('Point Clouds from Above')
-    plt.grid(True)
-    plt.legend()
-
-    # Set appropriate limits to crop unnecessary areas
-    plt.xlim(min(np.min(x_coords_transformed), np.min(x_coords_pair1)) - 1,
-             max(np.max(x_coords_transformed), np.max(x_coords_pair1)) + 1)
-    plt.ylim(min(np.min(z_coords_transformed), np.min(z_coords_pair1)) - 1,
-             max(np.max(z_coords_transformed), np.max(z_coords_pair1)) + 1)
-
-    # Show the plot
-    # plt.show()
-    plt.figure()
     plt.subplot(2, 1, 1)
     plt.imshow(l_0_img, cmap='gray')
-    plt.scatter([l_kp_0[m.queryIdx].pt[0] for m in inl_lr_0], [l_kp_0[m.queryIdx].pt[1] for m in inl_lr_0], c='r', s=4)
-
-    # plt.scatter([m.pt[0] for m in kp_l0[idx]],[m.pt[1] for m in kp_l0[idx]], c='r', s=8)
-    # plt.scatter([m.pt[0] for m in kp_l0[not_idx]],[m.pt[1] for m in kp_l0[not_idx]], c='b', s=5)
-    plt.title('left0: inliers')
+    plt.scatter([m[0] for m in inliers_0], [m[1] for m in inliers_0], c='r', s=2)
+    plt.scatter([m[0] for m in outlayers_0], [m[1] for m in outlayers_0], c='b', s=2)
+    plt.title('Q3.5: left_0, inliers in red, outliers in blue')
     plt.subplot(2, 1, 2)
     plt.imshow(l_1_img, cmap='gray')
-    plt.scatter([l_kp_1[m.queryIdx].pt[0] for m in inl_lr_1], [l_kp_1[m.queryIdx].pt[1] for m in inl_lr_1], c='r', s=4)
-    # plt.scatter([m.pt[0] for m in kp_l1[idx]], [m.pt[1] for m in kp_l1[idx]], c='r', s=8)
+    plt.scatter([m[0] for m in inliers_1], [m[1] for m in inliers_1], c='r', s=2)
+    plt.scatter([m[0] for m in outlayers_1], [m[1] for m in outlayers_1], c='b', s=2)
     # plt.scatter([m.pt[0] for m in kp_l1[not_idx]], [m.pt[1] for m in kp_l1[not_idx]], c='b', s=5)
-    plt.title('left1: inliers')
+    plt.title('Q3.5: left_1, inliers in red, outliers in blue')
+
+    #
+    # # Extract X and Z coordinates for pair 0 after transformation
+    # x_coords_transformed = transformed_pair0[:, 0]
+    # z_coords_transformed = transformed_pair0[:, 2]
+    #
+    # # Extract X and Z coordinates for pair 1
+    # x_coords_pair1 = pair1[:, 0]
+    # z_coords_pair1 = pair1[:, 2]
+    #
+    # # Scatter plot for pair 0 after transformation (in blue)
+    # plt.scatter(x_coords_transformed, z_coords_transformed, color='blue', label='Pair 0 (transformed)')
+    #
+    # # Scatter plot for pair 1 (in orange)
+    # plt.scatter(x_coords_pair1, z_coords_pair1, color='orange', label='Pair 1')
+    #
+    # # Adding labels and title
+    # plt.xlabel('X Coordinate')
+    # plt.ylabel('Z Coordinate')
+    # plt.title('Point Clouds from Above')
+    # plt.grid(True)
+    # plt.legend()
+    #
+    # # Set appropriate limits to crop unnecessary areas
+    # plt.xlim(min(np.min(x_coords_transformed), np.min(x_coords_pair1)) - 1,
+    #          max(np.max(x_coords_transformed), np.max(x_coords_pair1)) + 1)
+    # plt.ylim(min(np.min(z_coords_transformed), np.min(z_coords_pair1)) - 1,
+    #          max(np.max(z_coords_transformed), np.max(z_coords_pair1)) + 1)
+    #
+    # # Show the plot
+    # # plt.show()
+    # plt.figure()
+
     # plt.show()
     return T, best_idx
 
@@ -692,10 +718,11 @@ if __name__ == '__main__':
     #
     triangulated_pts_0, triangulated_pts_1, inl_lr_0, inl_lr_1 = q3_1(l_kp_0, r_kp_0, matches_0, l_kp_1, r_kp_1,
                                                                       matches_1, P, Q)
-    # matches_l = q3_2(img_l_0=l_0_img, img_l_1=l_1_img)
-    # t = q3_3(inl_lr_0, matches_l, inl_lr_1, triangulated_pts_0)
-    # concensus_idx, concensus_matches = find_concensus_points_and_idx(inl_lr_0, matches_l, inl_lr_1)
-    # relevant_triangulated = triangulated_pts_0[concensus_idx[:, 0]]
-    # ind, not_ind = q3_4(concensus_matches, triangulated_pts_0, t, l_kp_0, r_kp_0, l_kp_1, r_kp_1, l_0_img, l_1_img)
-    # T, inliers_idx = q3_5(idx, match, relevant_triangulated,  l_kp_0, r_kp_0,l_kp_1, r_kp_1)
+    matches_l = q3_2(img_l_0=l_0_img, img_l_1=l_1_img)
+    t = q3_3(inl_lr_0, matches_l, inl_lr_1, triangulated_pts_0)
+    concensus_idx, concensus_matches = find_concensus_points_and_idx(inl_lr_0, matches_l, inl_lr_1)
+    triangulated_pts_0 = triangulated_pts_0[concensus_idx[:, 0]]
+    ind, not_ind = q3_4(t,concensus_matches, triangulated_pts_0, l_kp_0, r_kp_0, l_kp_1, r_kp_1, l_0_img, l_1_img)
+    T, inliers_idx = q3_5(concensus_matches, triangulated_pts_0,  l_kp_0, r_kp_0,l_kp_1, r_kp_1)
+    # plt.show()
     loc, _ = q3_6()
