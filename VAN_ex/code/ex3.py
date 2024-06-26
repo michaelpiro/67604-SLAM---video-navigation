@@ -20,25 +20,47 @@ SEC_PROB = 0.99
 OUTLIER_PROB = 0.6
 MIN_SET_SIZE = 4
 # RANSAC_ITERATIONS = int(np.log(1 - SEC_PROB) / np.log(1 - np.power(1 - OUTLIER_PROB, MIN_SET_SIZE))) + 1
-RANSAC_ITERATIONS = 50
+RANSAC_ITERATIONS = 40
 
 LEN_DATA_SET = len(os.listdir(DATA_PATH + 'image_0'))
 # LEN_DATA_SET = 500
 
 GROUND_TRUTH_PATH = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/dataset/poses/00.txt"
 
-# FLANN_INDEX_KDTREE = 0
-# index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
+MAX_FEATURES = 4000
+
+
+# FLANN_INDEX_LSH = 6
+# index_params = dict(
+#     algorithm=FLANN_INDEX_LSH, trees=5)
 # search_params = dict(checks=50)
 # MATCHER = cv2.FlannBasedMatcher(index_params, search_params)
-MAX_FEATURES = 1000
-hessianThreshold = 3000
-# fast = cv2.FastFeatureDetector_create()
-# brief = cv2.xfeatures2d.BriefDescriptorExtractor_create()
+# FEATURE = cv2.SIFT_create(MAX_FEATURES)
+
 FEATURE = cv2.AKAZE_create()
-# FEATURE = cv2.FastFeatureDetector_create(threshold = 80,
-#                                      nonmaxSuppression = True)
-FEATURE.setThreshold(0.001)
+# print(FEATURE.getThreshold())
+# FEATURE.setThreshold(0.00015)
+FEATURE.setThreshold(0.009)
+# # FEATURE.setDescriptorChannels(1)
+# FEATURE.setDescriptorSize(128)
+# FEATURE.setDescriptorType(cv2.AKAZE_DESCRIPTOR_MLDB)
+# FEATURE.setNOctaves(4)
+# FEATURE.setNOctaveLayers(4)
+# FEATURE.setDiffusivity(cv2.KAZE_DIFF_PM_G1)
+
+
+
+# FEATURE = cv2.ORB_create(3000)
+# FEATURE.setFastThreshold(0)
+# FLANN_INDEX_LSH = 6
+# index_params = dict(
+#     algorithm=FLANN_INDEX_LSH, table_number=12, key_size=20, multi_probe_level=2
+# )
+# search_params = dict(checks=50)
+# MATCHER = cv2.FlannBasedMatcher(index_params, search_params)
+
+# FEATURE = cv2.GFTTDetector_create()
+
 MATCHER = cv2.BFMatcher(normType=cv2.NORM_HAMMING, crossCheck=True)
 
 
@@ -92,16 +114,19 @@ def read_extrinsic_matrices(file_path=GROUND_TRUTH_PATH, n=LEN_DATA_SET):
 
 
 def extract_kps_descs_matches(img_0, img1):
-    kp0 = FEATURE.detect(img_0, None)
-    kp1 = FEATURE.detect(img1, None)
-    desc0 = FEATURE.compute(img_0, kp0)[1]
-    desc1 = FEATURE.compute(img1, kp1)[1]
-    matches = MATCHER.match(desc0, desc1)
-    return kp0, kp1, desc0, desc1, matches
-    # kp0, desc0 = FEATURE.detectAndCompute(img_0, None)
-    # kp1, desc1 = FEATURE.detectAndCompute(img1, None)
+    # kp0 = FEATURE.detect(img_0, None)
+    # kp1 = FEATURE.detect(img1, None)
+    # desc0 = FEATURE.compute(img_0, kp0)[1]
+    # desc1 = FEATURE.compute(img1, kp1)[1]
     # matches = MATCHER.match(desc0, desc1)
     # return kp0, kp1, desc0, desc1, matches
+    kp0, desc0 = FEATURE.detectAndCompute(img_0, None)
+    kp1, desc1 = FEATURE.detectAndCompute(img1, None)
+    # start = timer()
+    matches = MATCHER.match(desc0, desc1)
+    # end = timer()
+    # print(f"Matching time: {end - start}, {len(matches)} matches found.")
+    return kp0, kp1, desc0, desc1, matches
 
 
 # def extract_inliers_outliers(kp_left, kp_right, matches):
@@ -134,7 +159,7 @@ def extract_inliers_outliers(kp_left, kp_right, matches):
         # Use numpy arrays for comparisons
         good_map1 = abs(kp_left_pts[ind_left, 1] - kp_right_pts[ind_right, 1]) < 2
         good_map2 = kp_left_pts[ind_left, 0] > kp_right_pts[ind_right, 0]
-        # good_map2 = good_map1
+        good_map2 = good_map1
         if good_map1 and good_map2:
             inliers.append(match)
         else:
@@ -297,16 +322,16 @@ def perform_tracking2(first_indx):
 
 
 def extract_matches_from_images(img_0, img1):
-    kp0 = FEATURE.detect(img_0)
-    kp1 = FEATURE.detect(img1)
-    desc0 = FEATURE.compute(img_0, kp0)[1]
-    desc1 = FEATURE.compute(img1, kp1)[1]
-    matches = MATCHER.match(desc0, desc1)
-    return kp0,kp1,matches
-    # kp0, desc0 = FEATURE.detectAndCompute(img_0)
-    # kp1, desc1 = FEATURE.detectAndCompute(img1, None)
+    # kp0 = FEATURE.detect(img_0, None)
+    # kp1 = FEATURE.detect(img1, None)
+    # desc0 = FEATURE.compute(img_0, kp0)[1]
+    # desc1 = FEATURE.compute(img1, kp1)[1]
     # matches = MATCHER.match(desc0, desc1)
-    # return kp0, kp1, matches
+    # return kp0,kp1,matches
+    kp0, desc0 = FEATURE.detectAndCompute(img_0, None)
+    kp1, desc1 = FEATURE.detectAndCompute(img1, None)
+    matches = MATCHER.match(desc0, desc1)
+    return kp0, kp1, matches
 
 
 def calculate_4_camera_locations(T: np.array):
@@ -650,6 +675,7 @@ def ransac_pnp(inliers_traingulated_pts, best_matches_pairs, kp_l_0, kp_r_0, kp_
     diff_coeff = np.zeros((5, 1))
     points_pixel_values = np.array([kp_l_1[m[1].queryIdx].pt for m in best_matches_pairs])
     for i in range(RANSAC_ITERATIONS):
+
         # Randomly select 4 points in the world coordinate system
         random_idx = np.random.choice(len(inliers_traingulated_pts), 4, replace=False)
         random_world_points = inliers_traingulated_pts[random_idx]
@@ -697,12 +723,15 @@ def find_best_transformation(traingulated_pts, matches, kp_l_first, kp_r_first, 
     img_pts = np.array([kp_l_second[m[1].queryIdx].pt for m in best_matches])
     diff_coeff = np.zeros((5, 1))
     pt_3d = traingulated_pts[inliers_idx[0]]
+    if len(pt_3d) < 4:
+        raise ValueError("Not enough points to estimate the transformation")
     success, rotation_vector, translation_vector = cv2.solvePnP(pt_3d, img_pts, K,
                                                                 distCoeffs=diff_coeff, flags=cv2.SOLVEPNP_EPNP)
     if success:
         return rodriguez_to_mat(rotation_vector, translation_vector), inliers_idx[0]
     return None
 
+import multiprocessing as mp
 
 def perform_tracking(first_indx):
     global_transformations = []
@@ -713,12 +742,14 @@ def perform_tracking(first_indx):
     in_f_0, out_f_0 = extract_inliers_outliers(kp_l_0, kp_r_0, matches_f_0)
     in_f_0 = np.array(in_f_0)
 
-    for i in range(first_indx + 1, LEN_DATA_SET):
-        if i%10 == 0:
-            print(f" frame {i} is being processed")
+    for i in tqdm(range(first_indx + 1, LEN_DATA_SET)):
+        # start =timer()
+
         # load the next frames and extract the keypoints and descriptors
         img_l_1, img_r_1 = ex2.read_images(i)
         kp_l_1, kp_r_1, desc_l_1, desc_r_1, matches_f_1 = extract_kps_descs_matches(img_l_1, img_r_1)
+        # kp_l_1, desc_l_1 = FEATURE.detectAndCompute(img_l_1, None)
+        # kp_r_1, desc_r_1 = FEATURE.detectAndCompute(img_r_1, None)
 
         # extract the inliers and outliers and triangulate the points
 
@@ -726,12 +757,25 @@ def perform_tracking(first_indx):
         in_f_1 = np.array(in_f_1)
 
         # extract matches of first left frame and the second left frame
-        matches_l_l = MATCHER.match(desc_l_0, desc_l_1)
-        matches_l_l = sorted(matches_l_l, key=lambda x: x.distance)[:300]
+        # start = timer()
+
+        matches_l_l = np.array(MATCHER.match(desc_l_0, desc_l_1))
+        # matches_l_l = np.array(MATCHER.knnMatch(desc_l_0, desc_l_1, k=2))[:, 0]
+        # indx_dist = sorted([(m.distance,i) for i,m in enumerate(matches_l_l)], key=lambda x: x[0])
+        # indx_dist = np.array(indx_dist).astype(int)[1000:,1]
+        # matches_l_l = matches_l_l[indx_dist]
+
+        # print("matches_l_l: ", len(matches_l_l))
+        # end = timer()
+        # print("matches_l_l time: ", end - start)
+        # matches_l_l = np.array(sorted(matches_l_l, key=lambda x: x.distance)[:300])
         # find the concensus matches
         # good matches idx is np.array. each element is a tuple (i0,i1)
         # where i0 is the index of the match in in_f_0 and i1 is the index of the match in in_f_1
+        # start = timer()
         good_matches_idx, matches_pairs = find_concensus_points_and_idx(in_f_0, matches_l_l, in_f_1)
+        # end = timer()
+        # print("find_concensus_points_and_idx time: ", end - start)
 
         # triangulate the points only the good matches points from in_f_0
         # start = timer()
@@ -755,6 +799,8 @@ def perform_tracking(first_indx):
         desc_l_0 = desc_l_1
         matches_f_0 = matches_f_1
         in_f_0 = in_f_1
+        # end = timer()
+        # print(f"iteration {i} took {end-start} seconds")
     return global_transformations
 
 
