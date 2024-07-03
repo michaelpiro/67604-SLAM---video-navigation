@@ -525,15 +525,15 @@ def read_images(idx):
 
 
 
-def find_concensus_points_and_idx(good_matches_lr_0, matches_l0_l1, good_matches_lr1):
+def find_concensus_points_and_idx(matches_lr_0, in_lr_0, matches_l0_l1,matches_lr1, in_lr1):
     # Create dictionaries for quick lookup
-    dict_lr_0 = {match.queryIdx: i for i, match in enumerate(good_matches_lr_0)}
-    dict_lr_1 = {match.queryIdx: i for i, match in enumerate(good_matches_lr1)}
+    dict_lr_0 = {match.queryIdx: i for i, match in enumerate(matches_lr_0) if in_lr_0[i]}
+    dict_lr_1 = {match.queryIdx: i for i, match in enumerate(matches_lr1)if in_lr1[i]}
 
     con = []
     matches = []
-
-    for match_l_l in matches_l0_l1:
+    matches_l0_l1_good_idx = []
+    for i, match_l_l in enumerate(matches_l0_l1):
         kp_ll_0 = match_l_l.queryIdx
         kp_ll_1 = match_l_l.trainIdx
 
@@ -542,20 +542,20 @@ def find_concensus_points_and_idx(good_matches_lr_0, matches_l0_l1, good_matches
             i0 = dict_lr_0[kp_ll_0]
             i1 = dict_lr_1[kp_ll_1]
             con.append((i0, i1))
-            matches.append((good_matches_lr_0[i0], good_matches_lr1[i1]))
+            matches.append((matches_lr_0[i0], matches_lr1[i1]))
+            matches_l0_l1_good_idx.append(i)
 
-    return np.array(con), np.array(matches)
+    return np.array(con), np.array(matches), matches_l0_l1_good_idx
 
 def create_DB(path_to_sequence=r"VAN_ex/code/VAN_ex/dataset/sequences/00", num_of_frames=50):
     l_prev_img, r_prev_img = ex2.read_images(0)
     kp_l_prev, kp_r_prev, desc_l_prev, desc_r_prev, matches_prev = ex3.extract_kps_descs_matches(l_prev_img, r_prev_img)
-    features_prev = np.array([desc_l_prev, desc_r_prev])
     DB = TrackingDB()
 
-    matches_prev = np.array(matches_prev)
-    in_prev = matches_prev[ex3.extract_inliers_outliers(kp_l_prev, kp_r_prev, matches_prev)[0]]
-    in_prev = np.array(in_prev)
-    matches_to_prev_left = None
+    in_prev = np.zeros(len(matches_prev))
+    in_prev[ex3.extract_inliers_outliers(kp_l_prev, kp_r_prev, matches_prev)[0]] = 1
+    feature_prev, links_prev = DB.create_links(desc_l_prev, kp_l_prev, kp_r_prev,matches_prev, in_prev)
+    DB.add_frame(links=links_prev, left_features=feature_prev,matches_to_previous_left=None, inliers=None)
 
     for i in tqdm(range(1, num_of_frames)):
         # load the next frames and extract the keypoints and descriptors
@@ -564,32 +564,44 @@ def create_DB(path_to_sequence=r"VAN_ex/code/VAN_ex/dataset/sequences/00", num_o
         matches_cur = np.array(matches_cur)
 
         # extract the inliers and outliers and triangulate the points
-        in_cur = matches_cur[ex3.extract_inliers_outliers(kp_l_cur, kp_r_cur, matches_cur)[0]]
-        in_cur = np.array(in_cur)
+        in_cur_idx = ex3.extract_inliers_outliers(kp_l_cur, kp_r_cur, matches_cur)[0]
+        in_cur = np.zeros(matches_cur.shape)
+        in_cur[in_cur_idx] = 1
+        # in_cur_instances = matches_cur[in_cur_idx]
+        # in_cur_instances = np.array(in_cur_instances)
+
+        #create the links for the curr frame:
+        feature_cur, links_cur = DB.create_links(desc_l_cur, kp_l_cur, kp_r_cur, matches_cur, in_cur)
 
         # extract matches of first left frame and the second left frame
         matches_l_l = MATCHER.match(desc_l_prev, desc_l_cur)
 
         # find the concensus matches
-        good_matches_idx, matches_pairs = ex3.find_concensus_points_and_idx(in_prev, matches_l_l, in_cur)
+        good_matches_idx, matches_pairs, matches_l_l_good_idx = find_concensus_points_and_idx(matches_prev, in_prev , matches_l_l,matches_cur, in_cur)
         # triangulate the points only the good matches points from in_prev
-        prev_best_inliers_idx = good_matches_idx[:, 0]
-        prev_best_inliers = in_prev[prev_best_inliers_idx]
-        traingulated_pts = ex2.cv_triangulate_matched_points(prev_best_inliers, kp_l_prev, kp_r_prev, P, Q)
+        prev_best_inliers = good_matches_idx[:, 0]
+        # prev_best_inliers = matches_prev[prev_best_inliers_idx]
+        traingulated_pts = ex2.cv_triangulate_matched_points(np.array(matches_prev)[prev_best_inliers], kp_l_prev, kp_r_prev, P, Q)
 
         # find the best transformation
         relative_transformation, idx = ex3.find_best_transformation(traingulated_pts, matches_pairs, kp_l_prev,
                                                                     kp_r_prev, kp_l_cur, kp_r_cur)
 
-        final_matches = (matches_pairs[idx])[:, 0]
+        #todo it needs to be so that the inliers would be a binary array for the matches of the l to l (matches l_l who are best
+        # final_matches = (matches_pairs[:, 0])[idx]
+        # final_matches = [match.queryIdx for match in final_matches]
+        in_prev_cur = np.zeros(len(matches_prev))
+        in_prev_cur[idx] = 1
 
-        valid_feature, links = DB.create_links(desc_l_prev, kp_l_prev,kp_r_prev,final_matches)
-        DB.add_frame(links, desc_l_prev,matches_to_prev_left)
-        # update the keypoints, descriptors and matches
-        kp_l_prev, kp_r_prev, desc_l_prev, desc_r_prev, matches_prev = kp_l_cur, kp_r_cur, desc_l_cur, \
-                                                                       desc_r_prev, matches_cur
-        features_prev = np.array(desc_l_cur, desc_r_cur)
-        #needs to be only matches from l to prev l who are good
-        matches_to_prev_left = final_matches
-        in_prev = in_cur
+        DB.add_frame(links_cur,desc_l_cur,matches_l_l, in_prev_cur)
+        #
+        # # update the keypoints, descriptors and matches
+        # kp_l_prev, kp_r_prev, desc_l_prev, desc_r_prev, matches_prev = kp_l_cur, kp_r_cur, desc_l_cur, \
+        #                                                                desc_r_prev, matches_cur
+        # #needs to be only matches from l to prev l who are good
+        # matches_to_prev_left = final_matches
+        # in_prev = in_cur
 
+if __name__ == '__main__':
+    path = r"C:\Users\elyas\University\SLAM video navigation\VAN_ex\code\VAN_ex\dataset\sequences\00"
+    create_DB(path, 120)
