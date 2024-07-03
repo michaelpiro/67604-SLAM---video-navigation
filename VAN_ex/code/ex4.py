@@ -590,17 +590,16 @@ def create_DB(path_to_sequence=r"VAN_ex/code/VAN_ex/dataset/sequences/00", num_o
         #todo it needs to be so that the inliers would be a binary array for the matches of the l to l (matches l_l who are best
         # final_matches = (matches_pairs[:, 0])[idx]
         # final_matches = [match.queryIdx for match in final_matches]
-        in_prev_cur = np.zeros(len(matches_prev))
-        in_prev_cur[idx] = 1
+        in_prev_cur = np.zeros(len(matches_l_l))
+        in_prev_cur[matches_l_l_good_idx] = 1
 
-        DB.add_frame(links_cur,desc_l_cur,matches_l_l, in_prev_cur)
-        #
-        # # update the keypoints, descriptors and matches
-        # kp_l_prev, kp_r_prev, desc_l_prev, desc_r_prev, matches_prev = kp_l_cur, kp_r_cur, desc_l_cur, \
-        #                                                                desc_r_prev, matches_cur
-        # #needs to be only matches from l to prev l who are good
-        # matches_to_prev_left = final_matches
-        # in_prev = in_cur
+        DB.add_frame(links_cur,feature_cur,matches_l_l, in_prev_cur)
+
+        # update the keypoints, descriptors and matches
+        kp_l_prev, kp_r_prev, desc_l_prev, desc_r_prev, matches_prev = kp_l_cur, kp_r_cur, desc_l_cur, \
+                                                                       desc_r_prev, matches_cur
+        #needs to be only matches from l to prev l who are good
+        in_prev = in_cur
 
 if __name__ == '__main__':
     path = r"C:\Users\elyas\University\SLAM video navigation\VAN_ex\code\VAN_ex\dataset\sequences\00"
