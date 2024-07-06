@@ -95,6 +95,7 @@ class TrackingDB:
         # map frameId --> link list, all the links of features that were not matched
         # ordered according to the order in the descriptors array
         self.leftover_links = {}
+        self.frameID_to_inliers_percent = {}
 
     """ a list of the frames on trackId """
     def frames(self, trackId) -> List[int]:
@@ -344,7 +345,8 @@ class TrackingDB:
             'frameId_to_lfeature': self.frameId_to_lfeature,
             'frameId_to_trackIds_list': self.frameId_to_trackIds_list,
             'prev_frame_links': self.prev_frame_links,
-            'leftover_links': self.leftover_links
+            'leftover_links': self.leftover_links,
+            'frameID_to_inliers_percent': self.frameID_to_inliers_percent
         }
         filename = base_filename + '.pkl'
         with open(filename, "wb") as file:
@@ -364,6 +366,7 @@ class TrackingDB:
             self.frameId_to_trackIds_list = data['frameId_to_trackIds_list']
             self.prev_frame_links = data['prev_frame_links']
             self.leftover_links = data['leftover_links']
+            self.frameID_to_inliers_percent = data['frameID_to_inliers_percent']
         print('TrackingDB loaded from', filename)
 
     """
