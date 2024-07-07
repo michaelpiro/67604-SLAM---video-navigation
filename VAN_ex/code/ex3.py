@@ -6,12 +6,12 @@ import os
 import numpy as np
 from tqdm import tqdm
 from timeit import default_timer as timer
-MAC = True
+MAC = False
 if MAC:
     DATA_PATH = '/Users/mac/67604-SLAM-video-navigation/VAN_ex/dataset/sequences/00/'
     # DATA_PATH = 'dataset/sequences/00'
 else:
-    DATA_PATH = r'...\VAN_ex\dataset\sequences\00\\'
+    DATA_PATH = r'C:\Users\elyas\University\SLAM video navigation\VAN_ex\code\VAN_ex\dataset\sequences\00\\'
 
 SEC_PROB = 0.999999
 OUTLIER_PROB = 0.45
@@ -20,10 +20,10 @@ RANSAC_ITERATIONS = int(np.log(1 - SEC_PROB) / np.log(1 - np.power(1 - OUTLIER_P
 
 # RANSAC_ITERATIONS = 36
 print(f"RANSAC iterations: {RANSAC_ITERATIONS}")
-LEN_DATA_SET = len(os.listdir(DATA_PATH + 'image_0'))
+LEN_DATA_SET = len(os.listdir(DATA_PATH + '/image_0'))
 # LEN_DATA_SET = 1500
 
-GROUND_TRUTH_PATH = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/dataset/poses/00.txt"
+GROUND_TRUTH_PATH = r"C:\Users\elyas\University\SLAM video navigation\VAN_ex\code\VAN_ex\dataset\poses\00.txt"
 
 FEATURE = cv2.AKAZE_create()
 FEATURE.setThreshold(0.003)
@@ -85,48 +85,33 @@ def extract_kps_descs_matches(img_0, img1):
     matches = MATCHER.match(desc0, desc1)
     return kp0, kp1, desc0, desc1, matches
 
-
 def extract_inliers_outliers(kp_left, kp_right, matches):
     kp_left_pts = np.array([kp.pt for kp in kp_left])
     kp_right_pts = np.array([kp.pt for kp in kp_right])
 
-    inliers = []
-    outliers = []
+    match_indices = np.array([(match.queryIdx, match.trainIdx) for match in matches])
+    left_indices = match_indices[:, 0]
+    right_indices = match_indices[:, 1]
 
-    for match_index in range(len(matches)):
-        ind_left = matches[match_index].queryIdx
-        ind_right = matches[match_index].trainIdx
+    good_map1 = np.abs(kp_left_pts[left_indices, 1] - kp_right_pts[right_indices, 1]) < 2
+    good_map2 = kp_left_pts[left_indices, 0] > kp_right_pts[right_indices, 0]
 
-        # Use numpy arrays for comparisons
-        good_map1 = abs(kp_left_pts[ind_left, 1] - kp_right_pts[ind_right, 1]) < 2
-        # good_map2 = kp_left_pts[ind_left, 0] > kp_right_pts[ind_right, 0]
-        good_map2 = kp_left_pts[ind_left, 0] > kp_right_pts[ind_right, 0]
-        # good_map2 = good_map1
-        if good_map1 and good_map2:
-            inliers.append(match_index)
-        else:
-            outliers.append(match_index)
+    inliers = np.where(good_map1 & good_map2)[0]
+    outliers = np.where(~(good_map1 & good_map2))[0]
 
-    return np.array(inliers), np.array(outliers)
-
+    return inliers, outliers
 
 def rodriguez_to_mat(rvec, tvec):
     rot, _ = cv2.Rodrigues(rvec)
     return np.hstack((rot, tvec))
 
-
 def choose_4_points(matches_lr_0, matches_l0_l1, matches_lr1):
-    con = []
-    for match_l_l in matches_l0_l1:
-        kp_ll_0 = match_l_l.queryIdx
-        kp_ll_1 = match_l_l.trainIdx
-        for i0 in range(len(matches_lr_0)):
-            if kp_ll_0 == matches_lr_0[i0].queryIdx:
-                for i1 in range(len(matches_lr1)):
-                    if kp_ll_1 == matches_lr1[i1].queryIdx:
-                        con.append((i0, i1))
-    return con
+    lr_0_dict = {match.queryIdx: i for i, match in enumerate(matches_lr_0)}
+    lr1_dict = {match.queryIdx: i for i, match in enumerate(matches_lr1)}
 
+    con = [(lr_0_dict[match.queryIdx], lr1_dict[match.trainIdx])
+           for match in matches_l0_l1 if match.queryIdx in lr_0_dict and match.trainIdx in lr1_dict]
+    return con
 
 def extract_y_values(matches, kp_l, kp_r):
     # Convert keypoints to numpy arrays
@@ -218,26 +203,14 @@ def plot_points_on_img1_img2(idx, not_idx, matches, img1, img2, kp_l0, kp_l1):
 #     return np.array(con), np.array(matches)
 
 def find_concensus_points_and_idx(good_matches_lr_0, matches_l0_l1, good_matches_lr1):
-    # Create dictionaries for quick lookup
     dict_lr_0 = {match.queryIdx: i for i, match in enumerate(good_matches_lr_0)}
     dict_lr_1 = {match.queryIdx: i for i, match in enumerate(good_matches_lr1)}
 
-    con = []
-    matches = []
-
-    for match_l_l in matches_l0_l1:
-        kp_ll_0 = match_l_l.queryIdx
-        kp_ll_1 = match_l_l.trainIdx
-
-        # Check if the match exists in both dictionaries
-        if kp_ll_0 in dict_lr_0 and kp_ll_1 in dict_lr_1:
-            i0 = dict_lr_0[kp_ll_0]
-            i1 = dict_lr_1[kp_ll_1]
-            con.append((i0, i1))
-            matches.append((good_matches_lr_0[i0], good_matches_lr1[i1]))
+    con = [(dict_lr_0[match.queryIdx], dict_lr_1[match.trainIdx])
+           for match in matches_l0_l1 if match.queryIdx in dict_lr_0 and match.trainIdx in dict_lr_1]
+    matches = [(good_matches_lr_0[i0], good_matches_lr1[i1]) for i0, i1 in con]
 
     return np.array(con), np.array(matches)
-
 
 # def find_concensus_points_and_idx(good_matches_lr_0, matches_l0_l1, good_matches_lr1):
 #     con = []
@@ -365,35 +338,39 @@ def transformation_agreement(T, consensus_matches, points_3d, kp_l0, kp_r0, kp_l
     agree_1 = np.logical_and(agree_r1, cond_x, agree_l1)
     return np.logical_and(agree_0, agree_1)
 
-
-
-def ransac_pnp(inliers_traingulated_pts, best_matches_pairs, kp_l_0, kp_r_0, kp_l_1, kp_r_1):
+def ransac_pnp(inliers_triangulated_pts, best_matches_pairs, kp_l_0, kp_r_0, kp_l_1, kp_r_1):
     """ Perform RANSAC to find the best transformation"""
     best_inliers = 0
     best_T = None
     best_matches_idx = None
     diff_coeff = np.zeros((5, 1))
     points_pixel_values = np.array([kp_l_1[m[1].queryIdx].pt for m in best_matches_pairs])
-    for i in range(RANSAC_ITERATIONS):
 
+    # Precompute matrix of homogeneous coordinates for triangulated points
+    ones = np.ones((inliers_triangulated_pts.shape[0], 1))
+    triangulated_points_4d = np.hstack((inliers_triangulated_pts, ones)).T
+
+    # Precompute pixel values of all keypoints in consensus_matches
+    real_x_y_values = np.array([[kp_l_0[m[0].queryIdx].pt[0], kp_r_0[m[0].trainIdx].pt[0],
+                                 kp_l_1[m[1].queryIdx].pt[0], kp_r_1[m[1].trainIdx].pt[0],
+                                 kp_l_0[m[0].queryIdx].pt[1], kp_r_0[m[0].trainIdx].pt[1],
+                                 kp_l_1[m[1].queryIdx].pt[1], kp_r_1[m[1].trainIdx].pt[1]]
+                                for m in best_matches_pairs])
+
+    for _ in range(RANSAC_ITERATIONS):
         # Randomly select 4 points in the world coordinate system
-        random_idx = np.random.choice(len(inliers_traingulated_pts), 4, replace=False)
-        random_world_points = inliers_traingulated_pts[random_idx]
-        # random_matches = best_matches_pairs[random_idx]
-        # Get the corresponding pixel values in l1
-        # random_points_pixel_values = np.array([kp_l_1[m[1].queryIdx].pt for m in random_matches])
+        random_idx = np.random.choice(len(inliers_triangulated_pts), 4, replace=False)
+        random_world_points = inliers_triangulated_pts[random_idx]
         random_points_pixel_values = points_pixel_values[random_idx]
 
-        # solve PnP problem to get the transformation
-        success, rotation_vector, translation_vector = cv2.solvePnP(random_world_points, random_points_pixel_values, K,
-                                                                    distCoeffs=diff_coeff, flags=cv2.SOLVEPNP_EPNP)
+        # Solve PnP problem to get the transformation
+        success, rotation_vector, translation_vector = cv2.solvePnP(random_world_points, random_points_pixel_values, K, distCoeffs=diff_coeff, flags=cv2.SOLVEPNP_EPNP)
         if success:
             T = rodriguez_to_mat(rotation_vector, translation_vector)
         else:
             continue
 
-        points_agreed = transformation_agreement(T, best_matches_pairs, inliers_traingulated_pts, kp_l_0, kp_r_0,
-                                                 kp_l_1, kp_r_1)
+        points_agreed = transformation_agreement_matrix(T, triangulated_points_4d, real_x_y_values)
 
         inliers_idx = np.where(points_agreed == True)
         if np.sum(points_agreed) > best_inliers:
@@ -403,23 +380,63 @@ def ransac_pnp(inliers_traingulated_pts, best_matches_pairs, kp_l_0, kp_r_0, kp_
 
     return best_T, best_matches_idx
 
+def transformation_agreement_matrix(T, points_4d, real_x_y_values):
+    T_4x4 = np.vstack((T, np.array([0, 0, 0, 1])))
+    l1_T = K @ T
+    l1_4d_points = (T_4x4 @ points_4d)
+    to_the_right = K @ M2
 
-def find_best_transformation(traingulated_pts, matches, kp_l_first, kp_r_first, kp_l_second, kp_r_second):
-    """ Find the best transformation using RANSAC"""
-    T, inliers_idx = ransac_pnp(traingulated_pts, matches, kp_l_first, kp_r_first, kp_l_second,
-                                kp_r_second)
+    # Transform points to left and right images
+    transform_to_l0_points = (P @ points_4d).T
+    transform_to_l0_points /= transform_to_l0_points[:, 2][:, np.newaxis]
+    real_y = real_x_y_values[:, 4]  # y_l0
+    agree_l0 = np.abs(transform_to_l0_points[:, 1] - real_y) < 2
 
-    best_matches = matches[inliers_idx[0]]
-    img_pts = np.array([kp_l_second[m[1].queryIdx].pt for m in best_matches])
-    diff_coeff = np.zeros((5, 1))
-    pt_3d = traingulated_pts[inliers_idx[0]]
-    if len(pt_3d) < 4:
-        raise ValueError("Not enough points to estimate the transformation")
-    success, rotation_vector, translation_vector = cv2.solvePnP(pt_3d, img_pts, K,
-                                                                distCoeffs=diff_coeff, flags=cv2.SOLVEPNP_EPNP)
-    if success:
-        return rodriguez_to_mat(rotation_vector, translation_vector), inliers_idx[0]
+    transform_to_r0_points = (to_the_right @ points_4d).T
+    transform_to_r0_points /= transform_to_r0_points[:, 2][:, np.newaxis]
+    real_y = real_x_y_values[:, 5]  # y_r0
+    agree_r0 = np.abs(transform_to_r0_points[:, 1] - real_y) < 2
+
+    # Ensure x condition
+    real_x_l = real_x_y_values[:, 0]  # x_l0
+    real_x_r = real_x_y_values[:, 1]  # x_r0
+    cond_x = real_x_l > real_x_r
+    agree_0 = agree_r0 & cond_x & agree_l0
+
+    transformed_to_l1_points = (K @ l1_4d_points[:3, :]).T
+    transformed_to_l1_points /= transformed_to_l1_points[:, 2][:, np.newaxis]
+    real_y = real_x_y_values[:, 6]  # y_l1
+    agree_l1 = np.abs(transformed_to_l1_points[:, 1] - real_y) < 2
+
+    transformed_to_r1_points = (to_the_right @ l1_4d_points).T
+    transformed_to_r1_points /= transformed_to_r1_points[:, 2][:, np.newaxis]
+    real_y = real_x_y_values[:, 7]  # y_r1
+    agree_r1 = np.abs(transformed_to_r1_points[:, 1] - real_y) < 2
+
+    real_x_l = real_x_y_values[:, 2]  # x_l1
+    real_x_r = real_x_y_values[:, 3]  # x_r1
+    cond_x = real_x_l > real_x_r
+    agree_1 = agree_r1 & cond_x & agree_l1
+
+    return agree_0 & agree_1
+
+
+def find_best_transformation(triangulated_pts, matches, kp_l_first, kp_r_first, kp_l_second, kp_r_second):
+    T, inliers_idx = ransac_pnp(triangulated_pts, matches, kp_l_first, kp_r_first, kp_l_second, kp_r_second)
+
+    if T is not None:
+        best_matches = matches[inliers_idx]
+        img_pts = np.array([kp_l_second[m[1].queryIdx].pt for m in best_matches])
+        diff_coeff = np.zeros((5, 1))
+        pt_3d = triangulated_pts[inliers_idx]
+
+        if len(pt_3d) >= 4:
+            success, rotation_vector, translation_vector = cv2.solvePnP(pt_3d, img_pts, K,
+                                                                        distCoeffs=diff_coeff, flags=cv2.SOLVEPNP_EPNP)
+            if success:
+                return rodriguez_to_mat(rotation_vector, translation_vector), inliers_idx
     return None
+
 
 
 # def find_negative_z_indx(points):
