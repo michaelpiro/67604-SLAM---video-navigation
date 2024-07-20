@@ -12,6 +12,7 @@ from tqdm import tqdm
 import random
 from tracking_database import TrackingDB, Link, MatchLocation
 from ex4 import K, M2, M1, P, Q, triangulate_last_frame
+from gtsam.utils.plot import plot_trajectory
 from ex3 import rodriguez_to_mat
 
 BASE_LINE_SIGN = -1
@@ -348,12 +349,10 @@ def create_factors_between_keyframes(graph, first_frame_idx, last_frame_idx, db,
         # reference_triangulated_point = gtsam_last_frame.backproject(
         #     gtsam.StereoPoint2(stereo_point2d[0], stereo_point2d[1], stereo_point2d[2]))
 
-
         # initial_estimate.insert(location_symbol, reference_triangulated_point)
 
         location_symbol = gtsam.symbol('l', track_id)
         for j in range(len(frames)):
-            print(frames)
             frame = frames[j]
             link = db.link(frame, track_id)
             if j == 0:
@@ -380,35 +379,30 @@ def create_factors_between_keyframes(graph, first_frame_idx, last_frame_idx, db,
             # insert the initial estimation of the triangulated point
 
 
-def extract_keyframes(db):
-    keyframe_indices = list(range(0, 100, 10))
-    return [1,5]
-    return keyframe_indices
+# def extract_keyframes(db):
+#     frames = db.frames()
+#     keyframe_indices = []
+#     for i in range(len(frames) - 1):
+#         if frames[i + 1] - frames[i] > 1:
+#             keyframe_indices.append((frames[i], frames[i + 1]))
+#     return keyframe_indices
+MAX_SIZE_KEYFRAME = 20
 
 
-def create_graph(db, keyframe_indices):
-    graph = gtsam.NonlinearFactorGraph()
-    initial_estimate = gtsam.Values()
-    k_matrix = k_object
-    create_factors_between_keyframes(graph, keyframe_indices[0], keyframe_indices[1], db, k_matrix, initial_estimate)
-    return graph, initial_estimate
-
-
-if __name__ == '__main__':
-    print(M1)
-    all_frames_serialized_db_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/DB3000"
-    serialized_db_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/DB_all_after_changing the percent"
-    # db = create_DB(path, LEN_DATA_SET)
-    # db.serialize(serialized_db_path)
-    db = TrackingDB()
-    db.load(serialized_db_path)
+def q_5_3(db):
     indices = extract_keyframes(db)
-    graph, initial = create_graph(db, indices)
-    # Run bundle adjustment
-    optimizer = gtsam.LevenbergMarquardtOptimizer(graph, initial)
-    result = optimizer.optimize()
+    graph_initial_dict = dict()
+    i = 0
+    for key_frames in indices:
+        print()
+        graph, initial = create_graph(db, key_frames[0], key_frames[1])
+        graph_initial_dict[i] = (graph, initial)
+        i += 1
 
     # Analyze errors
+    graph, initial = graph_initial_dict[0]
+    optimizer = gtsam.LevenbergMarquardtOptimizer(graph, initial)
+    result = optimizer.optimize()
     initial_error = graph.error(initial)
     final_error = graph.error(result)
     num_factors = graph.size()
@@ -418,12 +412,95 @@ if __name__ == '__main__':
     print(f"Number of factors: {num_factors}")
     print(f"Average factor error before optimization: {initial_error / num_factors}")
     print(f"Average factor error after optimization: {final_error / num_factors}")
-
     # Plot the optimized trajectory
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-    gtsam.utils.plot.plot_trajectory(result, indices, ax=ax)
+    plot_trajectory(fignum=0, values=result, title='trajectory')
 
+    # 2D Plot from above
+    fig, ax = plt.subplots()
+
+    # Extract the poses for keyframes
+    keyframe_positions = [result.atPose3(gtsam.symbol('c', i[0])).translation() for i in indices]
+    x_positions = [pose.x() for pose in keyframe_positions]
+    z_positions = [pose.z() for pose in keyframe_positions]
+
+    # Plot the keyframe positions
+    ax.plot(x_positions, z_positions, 'ro-', label='Keyframe Trajectory')
+
+    # If you have 3D landmarks, plot them as well
+    landmark_keys = [key for key in result.keys() if gtsam.symbolChr(key) == 'p']
+    landmark_positions = [result.atPoint3(key) for key in landmark_keys]
+    landmark_x = [point.x() for point in landmark_positions]
+    landmark_z = [point.z() for point in landmark_positions]
+
+    ax.scatter(landmark_x, landmark_z, c='b', marker='x', label='3D Landmarks')
+
+    ax.set_xlabel('X')
+    ax.set_ylabel('Z')
+    ax.set_title('View from Above')
+    ax.legend()
+    ax.grid(True)
+    plt.show()
+
+
+# def extract_keyframes(db: TrackingDB):
+#     keyFrames = []  # all keyframes start with zero
+#     frames = db.all_frames()
+#     lastKeyFrameId = 0
+#     while lastKeyFrameId < len(frames):
+#         tracksizeKeyframe = np.array(
+#             [np.sum(np.array(db.frames(track)) > lastKeyFrameId) for track in db.tracks(lastKeyFrameId)])
+#         sizeKeyframe = int(np.median(tracksizeKeyframe))  # we want to find the size that at least half of the
+#         # keypoint are bigger than it
+#         sizeKeyframe = min(sizeKeyframe, MAX_SIZE_KEYFRAME)
+#         if len(frames) - 1 - lastKeyFrameId < 5:
+#             keyFrames.append((lastKeyFrameId,len(frames) - 1))
+#         else:
+#             keyFrames.append((int(lastKeyFrameId), int(lastKeyFrameId+ sizeKeyframe)))
+#         lastKeyFrameId += int(sizeKeyframe)
+#     return keyFrames
+
+
+
+def extract_keyframes(db: TrackingDB):
+    keyFrames = []  # all keyframes start with zero
+    frames = db.all_frames()
+    i = 0
+    while i < len(frames) - 1:
+        tracks = set(db.tracks(i))
+        initial_len = len(tracks)
+
+        j = i+1
+        while j < i +21 and j < len(frames) - 1:
+            new_tracks = set(db.tracks(j))
+            tracks = tracks.intersection(new_tracks)
+            if len(tracks) < initial_len//4 or j == i+20 or j == len(frames) - 1:
+                keyFrames.append((i, j))
+                break
+            j += 1
+        print(f"j-i : {j- i}, i,j : {i}, {j}")
+
+        i = j
+
+    return keyFrames
+
+
+def create_graph(db, first_frame_idx, last_frame_idx):
+    graph = gtsam.NonlinearFactorGraph()
+    initial_estimate = gtsam.Values()
+    k_matrix = k_object
+    create_factors_between_keyframes(graph, first_frame_idx, last_frame_idx, db, k_matrix, initial_estimate)
+    return graph, initial_estimate
+
+
+if __name__ == '__main__':
+    all_frames_serialized_db_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/DB3000"
+    serialized_db_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/DB_all_after_changing the percent"
+    # db = create_DB(path, LEN_DATA_SET)
+    # db.serialize(serialized_db_path)
+    db = TrackingDB()
+    db.load(serialized_db_path)
+
+    q_5_3(db)
     plt.show()
     # q_5_1(db)
     # plt.show()
