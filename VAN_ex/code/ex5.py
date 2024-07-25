@@ -523,7 +523,6 @@ def calculate_all_relative_transformations(all_transformations, first_frame, las
     return new_trans
 
 
-
 def create_factors_between_keyframes(graph, first_frame_idx, last_frame_idx, db, k_matrix, initial_estimate,
                                      transformations):
     gtsam_frames = dict()
@@ -582,6 +581,7 @@ def create_factors_between_keyframes(graph, first_frame_idx, last_frame_idx, db,
                 gtsam.GenericStereoFactor3D(gtsam.StereoPoint2(link.x_left, link.x_right, link.y), sigma, pose_symbol,
                                             location_symbol,
                                             k_object))
+
     return graph, initial_estimate
 
 
@@ -593,7 +593,7 @@ def get_inverse(first):
     return inverse_first
 
 
-def translate_later_t_to_older_t(older_t, later_t):
+def translate_later_t_to_older_t(later_t, older_t):
     return older_t @ get_inverse(later_t)
 
 
@@ -610,37 +610,58 @@ MAX_SIZE_KEYFRAME = 20
 def q_5_3(db):
     graph_initial_dict = dict()
     i = 0
-    t = [M1] + read_extrinsic_matrices()
+    t = read_extrinsic_matrices()
     ts = np.array(t)
-    # indices = extract_keyframes(db, t)
+    indices = extract_keyframes(db, t)
     # transformations = np.array(read_extrinsic_matrices())
-    indices =[(0,11)]
-    for key_frames in indices:
+    key_frames = indices[0]
+    # for key_frames in indices:
         # transformations = np.load('transformations_ex3.npy')
         # print(f"keyframes {indices}")
         # print(f"keyframes {indices}")
 
-        graph, initial = create_graph(db, key_frames[0], key_frames[1], ts)
-        # graph, initial = create_graph(db, 0, 1, ts)
-        # graph, initial = create_graph(db, indices[0][0], indices[0][1], transformations)
-        #     graph_initial_dict[i] = (graph, initial)
-        # i += 1
+    graph, initial = create_graph(db, key_frames[0], key_frames[1], ts)
 
-        # Analyze errors
-        # graph, initial = graph_initial_dict[0]
-        optimizer = gtsam.LevenbergMarquardtOptimizer(graph, initial)
-        result = optimizer.optimize()
-        initial_error = graph.error(initial)
-        final_error = graph.error(result)
-        num_factors = graph.size()
-        print(f"first frame {key_frames[0]} last frame {key_frames[1]} ")
-        print(f"Initial total error: {initial_error}")
-        print(f"Final total error: {final_error}")
-        print(f"Number of factors: {num_factors}")
-        print(f"Average factor error before optimization: {initial_error / num_factors}")
-        print(f"Average factor error after optimization: {final_error / num_factors}")
+    optimizer = gtsam.LevenbergMarquardtOptimizer(graph, initial)
+    result = optimizer.optimize()
+    initial_error = graph.error(initial)
+    final_error = graph.error(result)
+    num_factors = graph.size()
+    print(f"first frame {key_frames[0]} last frame {key_frames[1]} ")
+    print(f"Initial total error: {initial_error}")
+    print(f"Final total error: {final_error}")
+    print(f"Number of factors: {num_factors}")
+    print(f"Average factor error before optimization: {initial_error / num_factors}")
+    print(f"Average factor error after optimization: {final_error / num_factors}")
     # Plot the optimized trajectory
-    plot_trajectory(fignum=0, values=result, title='trajectory')
+
+
+    worst_factor = None
+    for i in range(num_factors):
+        factor = graph.at(i)
+        if isinstance(factor, gtsam.GenericStereoFactor3D):
+            if worst_factor is None or factor.error(result) > worst_factor.error(result):
+                worst_factor = factor
+
+    print(f"Worst factor error: {worst_factor.error(initial)}")
+    camera_symbol = worst_factor.keys()[0]
+    print(f"Camera symbol: {camera_symbol}")
+    location_symbol = worst_factor.keys()[1]
+    print(f"Location symbol: {location_symbol}")
+    print(f"Initial triangulated point: {initial.atPoint3(location_symbol)}")
+    print(f"Final triangulated point: {result.atPoint3(location_symbol)}")
+    print(f"Initial camera pose: {initial.atPose3(camera_symbol)}")
+    # stereo_cam = gtsam.StereoCamera(initial.atPose3(worst_factor.poseKey()), k_object)
+    stereo_point = gtsam.StereoPoint2(worst_factor.measured()[0], worst_factor.measured()[1], worst_factor.measured()[2])
+    print(f"Initial triangulated point: {stereo_cam.backproject(stereo_point)}")
+    stereo_cam = gtsam.StereoCamera(result.atPose3(worst_factor.poseKey()), k_object)
+    stereo_point = gtsam.StereoPoint2(worst_factor.measured()[0], worst_factor.measured()[1], worst_factor.measured()[2])
+    print(f"Final triangulated point: {stereo_cam.backproject(stereo_point)}")
+
+
+
+
+    # plot_trajectory(fignum=0, values=result, title='trajectory')
 
     # 2D Plot from above
     # fig, ax = plt.subplots()
@@ -687,6 +708,67 @@ def q_5_3(db):
 #             keyFrames.append((int(lastKeyFrameId), int(lastKeyFrameId+ sizeKeyframe)))
 #         lastKeyFrameId += int(sizeKeyframe)
 #     return keyFrames
+
+def transform_to_gtsam_pose(frame_idx, transformations, frames):
+    reference_transform = transformations[frames[0]]
+    transform = transformations[frame_idx]
+    relavite = translate_later_t_to_older_t(transform,reference_transform)
+    return relavite
+
+
+def add_camera_poses(graph, transformations, frames, initial):
+    camera_symbols = dict()
+    frame_objects = dict()
+
+    for i, frame in enumerate(frames):
+        camera_symbol = gtsam.symbol('c', frame)
+        camera_symbols[frame] = camera_symbol
+
+        pose_matrix = transform_to_gtsam_pose(frame, transformations, frames)
+        pose = gtsam.Pose3(gtsam.Rot3(pose_matrix[:3, :3]), gtsam.Point3(pose_matrix[:3, 3]))
+        gt_frame = gtsam.StereoCamera(pose, k_object)
+        frame_objects[frame] = gt_frame
+        initial.insert(camera_symbol, pose)
+        if i == 0:
+            graph.add(gtsam.PriorFactorPose3(camera_symbol, pose, gtsam.noiseModel.Isotropic.Sigma(6, 1.0)))
+    return camera_symbols, frame_objects
+
+
+
+def optimize_track(db, track_id, transformations, fist_frame_idx, last_frame_idx):
+    graph = gtsam.NonlinearFactorGraph()
+    initial = gtsam.Values()
+
+    if fist_frame_idx == last_frame_idx:
+        frames = db.frames(track_id)
+    else:
+        frames = sorted([frame for frame in db.frames(track_id) if frame >= fist_frame_idx and frame <= last_frame_idx])
+
+    camera_symbols, frame_objects = add_camera_poses(graph, transformations, frames, initial)
+
+    track_last_frame_index = frames[-1]
+    last_frame = frame_objects[track_last_frame_index]
+    location_symbol = gtsam.symbol('l', track_id)
+    last_frame_link = db.link(track_last_frame_index, track_id)
+
+    location = last_frame.backproject(
+        gtsam.StereoPoint2(last_frame_link.x_left, last_frame_link.x_right, last_frame_link.y))
+    initial.insert(location_symbol, location)
+    for frame in frames:
+        link = db.link(frame, track_id)
+        pose_symbol = camera_symbols[frame]
+        sigma = gtsam.noiseModel.Isotropic.Sigma(3, 1.0)
+        factor = gtsam.GenericStereoFactor3D(gtsam.StereoPoint2(link.x_left, link.x_right, link.y), sigma, pose_symbol,
+                                             location_symbol,
+                                             k_object)
+        graph.add(factor)
+
+    # Create the optimizer
+    optimizer = gtsam.LevenbergMarquardtOptimizer(graph, initial)
+    result = optimizer.optimize()
+    if graph.error(result) > 0.5:
+        print(f"error after optimization {graph.error(result)}, track {track_id} frames {len(frames)} ")
+
 
 
 def find_bad_tracks(first_frame_idx, last_frame_idx, db, k_matrix,
@@ -841,25 +923,67 @@ def create_graph(db, first_frame_idx, last_frame_idx, transformations):
     return graph, initial_estimate
 
 
+def get_feature_location(tracking_db: TrackingDB, frameId: int, trackId: int) -> Tuple[float, float]:
+    link = tracking_db.linkId_to_link[(frameId, trackId)]
+    return link.x_left, link.y
+
+def visualize_track(tracking_db: TrackingDB, trackId: int):
+    frames = tracking_db.frames(trackId)
+    print(f"Track {trackId} has {len(frames)} frames")
+    plt.figure()
+    for i in range(0, len(frames), 1):
+        # print(f"Frame {frames[i]}")
+        frameId = frames[i]
+        img, _ = read_images(frameId)
+        x_left, y = get_feature_location(tracking_db, frameId, trackId)
+        x_min = int(max(x_left - 10, 0))
+        x_max = int(min(x_left + 10, img.shape[1]))
+        y_min = int(max(y - 10, 0))
+        y_max = int(min(y + 10, img.shape[0]))
+        cutout = img[y_min:y_max, x_min:x_max]
+
+        plt.subplot(len(frames), 2, 2 * i + 1)
+        plt.imshow(img, cmap='gray')
+        plt.scatter(x_left, y, color='red')  # Center of the cutout
+
+        plt.subplot(len(frames), 2, 2 * i + 2)
+        plt.imshow(cutout, cmap='gray')
+        # plt.scatter([10], [10], color='red', marker='x', linewidths=1)  # Center of the cutout
+        if i == 0:
+            plt.title(f"Frame {frameId}, Track {trackId}")
+
 if __name__ == '__main__':
     all_frames_serialized_db_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/DB3000"
     # serialized_db_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/DB_all_after_changing the percent"
-    serialized_db_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/NEWEST"
+    serialized_db_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/NEWEST_SIFT"
     # db = create_DB(path, LEN_DATA_SET)
     # db.serialize(serialized_db_path)
     db = TrackingDB()
     db.load(serialized_db_path)
-    # transformations = np.array([M1] + read_extrinsic_matrices())
+    transformations = np.array( read_extrinsic_matrices())
     # find_bad_tracks(0,10,db,k_object,transformations)
-    # q_5_1(db)
+    # visualize_track(db,53475)
+    # plt.show()
 
+    # q_5_1(db)
+    # for track in db.all_tracks():
+    #     frames = sorted(db.frames(track))
+    #     optimize_track(db,track,transformations,frames[0],frames[-1])
     q_5_3(db)
+    #
+    # i = 0
+    # for j in range(12):
+    #     for t in db.tracks(j):
+    #         i += len(db.frames(t))
+    #     print(i / len(db.tracks(j)), len(db.tracks(j)))
+    #     i = 0
 
-    i = 0
-    for t in db.tracks(0):
-        i+= len(db.frames(t))
-    print(i/len(db.tracks(0)))
+    # frames = sorted(db.frames(26988))
+    # t0 = transformations[frames[0]]
+    # ti = transformations[frames[-1]]
+    # print(calculate_distance_between_keyframes(t0,ti))
 
     # plt.show()
     # q_5_1(db)
     # plt.show()
+

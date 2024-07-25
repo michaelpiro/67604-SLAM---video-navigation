@@ -10,29 +10,40 @@ from tracking_database import TrackingDB, Link, MatchLocation
 from tqdm import tqdm
 # from ex4_2_to_6 import q_4_2, q_4_3, q_4_4, q_4_5, q_4_6, q_4_7, find_longest_track_frames
 
-from ex3 import RANSAC_ITERATIONS, P, Q, K, M1, M2, read_extrinsic_matrices, extract_inliers_outliers, rodriguez_to_mat
+from ex3 import P, Q, K, M1, M2, read_extrinsic_matrices, rodriguez_to_mat
 from ex5 import get_inverse, translate_later_t_to_older_t
 import ex2
 import random
 
 NO_ID = -1
 
-FEATURE = cv2.AKAZE_create()
+# FEATURE = cv2.SIFT_create()
+FEATURE = cv2.SIFT_create()
 # FEATURE.setNOctaves(2)
 # FEATURE.setThreshold(0.008)
 # print(FEATURE.getThreshold())
-MATCHER = cv2.BFMatcher(normType=cv2.NORM_HAMMING, crossCheck=False)
+bf_matcher = cv2.BFMatcher(normType=cv2.NORM_L2, crossCheck=False)
+# FLANN parameters
+FLANN_INDEX_KDTREE = 1
+index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
+search_params = dict(checks=50)  # or pass empty dictionary
+
+flann = cv2.FlannBasedMatcher(index_params, search_params)
+MATCHER = flann
+# MATCHER = bf_matcher
+
+# MATCHER2 = cv2.BFMatcher(normType=cv2.NORM_HAMMING, crossCheck=False)
 # DATA_PATH = r'C:\Users\elyas\University\SLAM video navigation\VAN_ex\code\VAN_ex\dataset\sequences\00\\'
 DATA_PATH = '/Users/mac/67604-SLAM-video-navigation/VAN_ex/dataset/sequences/00/'
 LEN_DATA_SET = len(os.listdir(DATA_PATH + 'image_0'))
+
+
 # LEN_DATA_SET = 1000
 # P = ex3.P
 # Q = ex3.Q
 # K = ex3.K
 # M1 = ex3.M1
 # M2 = ex3.M2
-
-I = 0
 
 
 class Match:
@@ -75,7 +86,45 @@ def extract_kps_descs_matches(img_0, img1):
     kp0, desc0 = FEATURE.detectAndCompute(img_0, None)
     kp1, desc1 = FEATURE.detectAndCompute(img1, None)
     matches = MATCHER.match(desc0, desc1)
+    # kp0_new = []
+    # kp1_new = []
+    # desc0_new = []
+    # desc1_new = []
+    # for match in matches:
+    #     ind0 = match.queryIdx
+    #     ind1 = match.trainIdx
+    #     kp0_new.append(kp0[ind0])
+    #     kp1_new.append(kp1[ind1])
+    #     desc0_new.append(desc0[ind0])
+    #     desc1_new.append(desc1[ind1])
+    #
+    # return kp0_new, kp1_new, desc0_new, desc1_new, matches
     return kp0, kp1, desc0, desc1, matches
+
+
+def extract_inliers_outliers(kp_left, kp_right, matches):
+    kp_left_pts = np.array([kp.pt for kp in kp_left])
+    kp_right_pts = np.array([kp.pt for kp in kp_right])
+
+    inliers = []
+    outliers = []
+
+    for match_index in range(len(matches)):
+        ind_left = matches[match_index].queryIdx
+        ind_right = matches[match_index].trainIdx
+        point_left = kp_left[ind_left].pt
+        point_right = kp_right[ind_right].pt
+
+        # Use numpy arrays for comparisons
+        good_map1 = abs(point_left[1] - point_right[1]) < 2
+        good_map2 = point_left[0] > point_right[0]
+        # good_map2 = True
+        if good_map1 and good_map2:
+            inliers.append(match_index)
+        else:
+            outliers.append(match_index)
+
+    return np.array(inliers), np.array(outliers)
 
 
 def extract_agreements(matches_lr_0, in_lr_0, in_prev_idx, matches_l0_l1, matches_lr1, in_lr1, in_cur_idx):
@@ -176,17 +225,20 @@ def transformation_agreement(T, traingulated_pts, prev_left_pix_values, prev_rig
     transform_to_l0_points = (P @ points_4d).T
     transform_to_l0_points = transform_to_l0_points / transform_to_l0_points[:, 2][:, np.newaxis]
     real_y = prev_left_pix_values[:, 1]
-    y_diff = transform_to_l0_points[:, 1] - real_y
     agree_l0 = np.abs(transform_to_l0_points[:, 1] - real_y) < 2
+    agree_x = np.abs(transform_to_l0_points[:, 0] - prev_left_pix_values[:, 0]) < 2
+    agree_l0 = np.logical_and(agree_l0, agree_x)
 
     transform_to_r0_points = (to_the_right @ points_4d).T
     transform_to_r0_points = transform_to_r0_points / transform_to_r0_points[:, 2][:, np.newaxis]
     real_y = prev_right_pix_values[:, 1]
     agree_r0 = np.abs(transform_to_r0_points[:, 1] - real_y) < 2
+    agree_x = np.abs(transform_to_r0_points[:, 0] - prev_right_pix_values[:, 0]) < 2
+    agree_r0 = np.logical_and(agree_r0, agree_x)
     if x_condition:
         real_x_l = prev_left_pix_values[:, 0]
         real_x_r = prev_right_pix_values[:, 0]
-        cond_x = real_x_l > real_x_r + 2
+        cond_x = real_x_l > real_x_r
     else:
         cond_x = np.ones_like(agree_r0)
     agree_0 = np.logical_and(agree_r0, cond_x, agree_l0)
@@ -196,19 +248,40 @@ def transformation_agreement(T, traingulated_pts, prev_left_pix_values, prev_rig
     transformed_to_l1_points = transformed_to_l1_points / transformed_to_l1_points[:, 2][:, np.newaxis]
     real_y = ordered_cur_left_pix_values[:, 1]
     agree_l1 = np.abs(transformed_to_l1_points[:, 1] - real_y) < 2
+    agree_x = np.abs(transformed_to_l1_points[:, 0] - ordered_cur_left_pix_values[:, 0]) < 2
+    agree_l1 = np.logical_and(agree_l1, agree_x)
 
     transformed_to_r1_points = (to_the_right @ l1_4d_points).T
     transformed_to_r1_points = transformed_to_r1_points / transformed_to_r1_points[:, 2][:, np.newaxis]
     real_y = ordered_cur_right_pix_values[:, 1]
     agree_r1 = np.abs(transformed_to_r1_points[:, 1] - real_y) < 2
+    agree_x = np.abs(transformed_to_r1_points[:, 0] - ordered_cur_right_pix_values[:, 0]) < 2
+    agree_r1 = np.logical_and(agree_r1, agree_x)
     if x_condition:
         real_x_l = ordered_cur_left_pix_values[:, 0]
         real_x_r = ordered_cur_right_pix_values[:, 0]
-        cond_x = real_x_l > real_x_r + 2
+        cond_x = real_x_l > real_x_r
     else:
         cond_x = np.ones_like(agree_r1)
     agree_1 = np.logical_and(agree_r1, cond_x, agree_l1)
     return np.logical_and(agree_0, agree_1)
+
+
+#
+# def transformation_agreement(T, traingulated_pts, ordered_cur_left_pix_values):
+#     T_4x4 = np.vstack((T, np.array([0, 0, 0, 1])))
+#     points_4d = np.hstack((traingulated_pts, np.ones((traingulated_pts.shape[0], 1)))).T
+#     l1_4d_points = (T_4x4 @ points_4d)
+#     to_the_right = (K @ M2)
+#
+#
+#
+#     transformed_to_l1_points = (K @ l1_4d_points[:3, :]).T
+#     transformed_to_l1_points = transformed_to_l1_points / transformed_to_l1_points[:, 2][:, np.newaxis]
+#     real_y = ordered_cur_left_pix_values[:, 1]
+#     agree_y = np.abs(transformed_to_l1_points[:, 1] - real_y) < 2
+#     agree_x = np.abs(transformed_to_l1_points[:, 0] - ordered_cur_left_pix_values[:, 0]) < 2
+#     return np.logical_and(agree_y, agree_x)
 
 
 def triangulate_points(matches, kp_l, kp_r, p, q):
@@ -230,6 +303,20 @@ def triangulate_points(matches, kp_l, kp_r, p, q):
     return x
 
 
+def triangulate_links(links, p, q):
+    """
+    Triangulate the matched points using OpenCV
+    :param inliers:
+    :return:
+    """
+    x = np.zeros((len(links), 3))
+    for i, link in enumerate(links):
+        left_point = link.x_left, link.y
+        right_point = link.x_right, link.y
+        x[i] = ex2.linear_least_squares_triangulation(p, q, left_point, right_point).T
+    return x
+
+
 def get_pixels_from_matches(matches, kp_1, kp_2):
     pixels_first = []
     pixels_second = []
@@ -239,8 +326,16 @@ def get_pixels_from_matches(matches, kp_1, kp_2):
     return pixels_first, pixels_second
 
 
-def ransac_pnp_for_tracking_db(matches_l_l, matches_prev, matches_cur, concensus_idx, kp_l_prev, kp_r_prev, kp_l_cur,
-                               kp_r_cur, concensus_matches, inliers_percent):
+def get_pixels_from_links(links):
+    pixels_first = []
+    pixels_second = []
+    for link in links:
+        pixels_first.append((link.x_left, link.y))
+        pixels_second.append((link.x_right, link.y))
+    return pixels_first, pixels_second
+
+
+def ransac_pnp_for_tracking_db(matches_l_l, prev_links, cur_links, inliers_percent):
     """ Perform RANSAC to find the best transformation"""
     # best_inliers = 0
     # best_T = None
@@ -311,19 +406,20 @@ def ransac_pnp_for_tracking_db(matches_l_l, matches_prev, matches_cur, concensus
     # ordered_cur_left_pix_values = []
     # ordered_cur_right_pix_values = []
 
-    sec_prob = 0.9999999
-    outliers_prob = 1-(inliers_percent/100)
-    min_set_size = 4
-    ransac_iterations = int(np.log(1 - sec_prob) / np.log(1 - np.power(1 - outliers_prob, min_set_size))) + 1
+    ransac_iterations = calc_ransac_iteration(inliers_percent)
 
-    concensus_matches = np.array(concensus_matches)
-    match_lr_0 = concensus_matches[:, 0]
-    match_lr_1 = concensus_matches[:, 1]
-    # match_left_left = concensus_matches[:, 2]
+    filtered_links_cur = []
+    filtered_links_prev = []
+    for match in matches_l_l:
+        link_index = match.trainIdx
+        filtered_links_cur.append(cur_links[link_index])
 
-    points_3d = triangulate_points(match_lr_0, kp_l_prev, kp_r_prev, P, Q)
-    prev_left_pix_values, prev_right_pix_values = get_pixels_from_matches(match_lr_0, kp_l_prev, kp_r_prev)
-    ordered_cur_left_pix_values, ordered_cur_right_pix_values = get_pixels_from_matches(match_lr_1, kp_l_cur, kp_r_cur)
+        link_index = match.queryIdx
+        filtered_links_prev.append(prev_links[link_index])
+
+    points_3d = triangulate_links(filtered_links_prev, P, Q)
+    prev_left_pix_values, prev_right_pix_values = get_pixels_from_links(filtered_links_prev)
+    ordered_cur_left_pix_values, ordered_cur_right_pix_values = get_pixels_from_links(filtered_links_cur)
 
     prev_left_pix_values = np.array(prev_left_pix_values)
     prev_right_pix_values = np.array(prev_right_pix_values)
@@ -344,7 +440,6 @@ def ransac_pnp_for_tracking_db(matches_l_l, matches_prev, matches_cur, concensus
     best_inliers = 0
     best_T = None
     best_matches_idx = None
-    kp_l_cur = np.array(kp_l_cur)
 
     for i in range(ransac_iterations):
         random_idx = np.random.choice(len(points_3d), 4, replace=False)
@@ -363,53 +458,196 @@ def ransac_pnp_for_tracking_db(matches_l_l, matches_prev, matches_cur, concensus
         #                                          x_condition=True)
 
         points_agreed = transformation_agreement(T, points_3d, prev_left_pix_values, prev_right_pix_values,
-                                                 ordered_cur_left_pix_values, ordered_cur_right_pix_values,
-                                                 x_condition=True)
+                                                 ordered_cur_left_pix_values, ordered_cur_right_pix_values)
 
         num_inliers = np.sum(points_agreed)
         if num_inliers > best_inliers:
             best_inliers = num_inliers
-            best_T = T
+            # best_T = T
             best_matches_idx = np.where(points_agreed == True)[0]
     # print(best_inliers,len(concensus_idx))
-    inliers_3d_points = points_3d[best_matches_idx]
-    # print(best_matches_idx)
 
-    # print(inliers_3d_points)
-    inliers_cur_points = ordered_cur_left_pix_values[best_matches_idx]
-    # inliers_cur_points = [(kp_l_cur[b])[0].pt for b in best_matches_idx]
-    # print(inliers_cur_points)
-
-    # assert len(inliers_3d_points) == len(inliers_cur_points)
-    assert len(inliers_3d_points) >= 4
-
-    success, rotation_vector, translation_vector = cv2.solvePnP(inliers_3d_points, inliers_cur_points, K,
-                                                                distCoeffs=diff_coeff, flags=cv2.SOLVEPNP_EPNP)
-    if success:
-        T = rodriguez_to_mat(rotation_vector, translation_vector)
-    else:
-        T = best_T
-
-    # global_cur_index = concensus_matches_cur_idx[best_matches_idx]
-    # global_prev_index = concensus_matches_prev_idx[best_matches_idx]
-    # global_l_l_index = concensus_matches_l_l_idx[best_matches_idx]
-    # return T, global_cur_index, global_prev_index, global_l_l_index, best_matches_idx
     return best_matches_idx
 
 
+def calc_ransac_iteration(inliers_percent):
+    sec_prob = 0.9999999
+    outliers_prob = 1 - (inliers_percent / 100)
+    min_set_size = 4
+    ransac_iterations = int(np.log(1 - sec_prob) / np.log(1 - np.power(1 - outliers_prob, min_set_size))) + 1
+    return ransac_iterations
+
+
+# def ransac_pnp_for_tracking_db(matches_l_l, matches_prev, matches_cur, concensus_idx, kp_l_prev, kp_r_prev, kp_l_cur,
+#                                kp_r_cur, concensus_matches, inliers_percent):
+#     """ Perform RANSAC to find the best transformation"""
+#     # best_inliers = 0
+#     # best_T = None
+#     # best_matches_idx = None
+#     # diff_coeff = np.zeros((5, 1))
+#     #
+#     #
+#     # prev_left_pix_values = []
+#     # prev_right_pix_values = []
+#     # ordered_cur_left_pix_values = []
+#     # ordered_cur_right_pix_values = []
+#     # for link in links_prev:
+#     #     prev_left_pix_values.append((link.x_left, link.y))
+#     #     prev_right_pix_values.append((link.x_right, link.y))
+#     # for match in matches:
+#     #     link_index = match.trainIdx
+#     #     ordered_cur_left_pix_values.append((links_cur[link_index].x_left, links_cur[link_index].y))
+#     #     ordered_cur_right_pix_values.append((links_cur[link_index].x_right, links_cur[link_index].y))
+#     # prev_left_pix_values = np.array(prev_left_pix_values)
+#     # prev_right_pix_values = np.array(prev_right_pix_values)
+#     # ordered_cur_left_pix_values = np.array(ordered_cur_left_pix_values)
+#     # ordered_cur_right_pix_values = np.array(ordered_cur_right_pix_values)
+#     #
+#     # for i in range(ex3.RANSAC_ITERATIONS):
+#     #
+#     #     # Randomly select 4 points in the world coordinate system
+#     #     random_idx = np.random.choice(len(traingulated_pts), 4, replace=False)
+#     #     random_world_points = traingulated_pts[random_idx]
+#     #     random_cur_l_pixels = ordered_cur_left_pix_values[random_idx]
+#     #
+#     #     # solve PnP problem to get the transformation
+#     #     success, rotation_vector, translation_vector = cv2.solvePnP(random_world_points, random_cur_l_pixels, K,
+#     #                                                                 distCoeffs=diff_coeff, flags=cv2.SOLVEPNP_EPNP)
+#     #     if success:
+#     #         T = ex3.rodriguez_to_mat(rotation_vector, translation_vector)
+#     #     else:
+#     #         continue
+#     #
+#     #     points_agreed = transformation_agreement(T, traingulated_pts, prev_left_pix_values, prev_right_pix_values,
+#     #                                              ordered_cur_left_pix_values, ordered_cur_right_pix_values,
+#     #                                              x_condition=True)
+#     #
+#     #     inliers_idx = np.where(points_agreed == True)
+#     #     if np.sum(points_agreed) > best_inliers:
+#     #         best_inliers = np.sum(points_agreed)
+#     #         best_T = T
+#     #         best_matches_idx = inliers_idx
+#     #
+#     # return best_T, best_matches_idx, ordered_cur_left_pix_values[best_matches_idx[0]]
+#     # concensus_idx = np.array(concensus_idx)
+#     # print(f"len concensus_idx: {len(concensus_idx)}")
+#     # concensus_matches_l_l_idx = concensus_idx[:, 2]
+#     # concensus_matches_prev_idx = concensus_idx[:, 0]
+#     # concensus_matches_cur_idx = concensus_idx[:, 1]
+#     #
+#     # matches_prev = np.array(matches_prev)
+#     # matches_cur = np.array(matches_cur)
+#     # matches_l_l = np.array(matches_l_l)
+#
+#     # concensus_matches_l_l = matches_l_l[concensus_matches_l_l_idx]
+#     # concensus_matches_prev = matches_prev[concensus_matches_prev_idx]
+#     # concensus_matches_cur = matches_cur[concensus_matches_cur_idx]
+#     #
+#     # # points_3d = triangulate_points(concensus_matches_prev, kp_l_prev, kp_r_prev, P, Q)
+#     # points_to_triangulate = []
+#     # prev_left_pix_values = []
+#     # prev_right_pix_values = []
+#     # ordered_cur_left_pix_values = []
+#     # ordered_cur_right_pix_values = []
+#
+#     sec_prob = 0.9999999
+#     outliers_prob = 1-(inliers_percent/100)
+#     min_set_size = 4
+#     ransac_iterations = int(np.log(1 - sec_prob) / np.log(1 - np.power(1 - outliers_prob, min_set_size))) + 1
+#
+#     concensus_matches = np.array(concensus_matches)
+#     match_lr_0 = concensus_matches[:, 0]
+#     match_lr_1 = concensus_matches[:, 1]
+#     # match_left_left = concensus_matches[:, 2]
+#
+#     points_3d = triangulate_points(match_lr_0, kp_l_prev, kp_r_prev, P, Q)
+#     prev_left_pix_values, prev_right_pix_values = get_pixels_from_matches(match_lr_0, kp_l_prev, kp_r_prev)
+#     ordered_cur_left_pix_values, ordered_cur_right_pix_values = get_pixels_from_matches(match_lr_1, kp_l_cur, kp_r_cur)
+#
+#     prev_left_pix_values = np.array(prev_left_pix_values)
+#     prev_right_pix_values = np.array(prev_right_pix_values)
+#     ordered_cur_left_pix_values = np.array(ordered_cur_left_pix_values)
+#     ordered_cur_right_pix_values = np.array(ordered_cur_right_pix_values)
+#
+#     #
+#     # for agreement in concensus_matches:
+#     #     match_lr_0, match_lr_1, match_l_l = agreement[0], agreement[1], agreement[2]
+#     #     points_to_triangulate.append(match_lr_0)
+#
+#     # for match in matches:
+#     #     link_index = match.trainIdx
+#     #     ordered_cur_left_pix_values.append((links_cur[link_index].x_left, links_cur[link_index].y))
+#     #     ordered_cur_right_pix_values.append((links_cur[link_index].x_right, links_cur[link_index].y))
+#
+#     diff_coeff = np.zeros((5, 1))
+#     best_inliers = 0
+#     best_T = None
+#     best_matches_idx = None
+#     kp_l_cur = np.array(kp_l_cur)
+#
+#     for i in range(ransac_iterations):
+#         random_idx = np.random.choice(len(points_3d), 4, replace=False)
+#         random_world_points = points_3d[random_idx]
+#         # random_cur_l_pixels = np.array([(kp_l_cur[concensus_matches_cur_idx])[rand].pt for rand in random_idx])
+#         random_cur_l_pixels = ordered_cur_left_pix_values[random_idx]
+#         success, rotation_vector, translation_vector = cv2.solvePnP(random_world_points, random_cur_l_pixels, K,
+#                                                                     distCoeffs=diff_coeff, flags=cv2.SOLVEPNP_EPNP)
+#
+#         if success:
+#             T = rodriguez_to_mat(rotation_vector, translation_vector)
+#         else:
+#             continue
+#
+#         # points_agreed = transformation_agreement(T, points_3d, kp_l_prev, kp_r_prev, kp_l_cur, kp_r_cur,
+#         #                                          x_condition=True)
+#
+#         points_agreed = transformation_agreement(T, points_3d, prev_left_pix_values, prev_right_pix_values,
+#                                                  ordered_cur_left_pix_values, ordered_cur_right_pix_values,
+#                                                  x_condition=True)
+#
+#         num_inliers = np.sum(points_agreed)
+#         if num_inliers > best_inliers:
+#             best_inliers = num_inliers
+#             best_T = T
+#             best_matches_idx = np.where(points_agreed == True)[0]
+#     # print(best_inliers,len(concensus_idx))
+#     inliers_3d_points = points_3d[best_matches_idx]
+#     # print(best_matches_idx)
+#
+#     # print(inliers_3d_points)
+#     inliers_cur_points = ordered_cur_left_pix_values[best_matches_idx]
+#     # inliers_cur_points = [(kp_l_cur[b])[0].pt for b in best_matches_idx]
+#     # print(inliers_cur_points)
+#
+#     # assert len(inliers_3d_points) == len(inliers_cur_points)
+#     assert len(inliers_3d_points) >= 4
+#
+#     success, rotation_vector, translation_vector = cv2.solvePnP(inliers_3d_points, inliers_cur_points, K,
+#                                                                 distCoeffs=diff_coeff, flags=cv2.SOLVEPNP_EPNP)
+#     if success:
+#         T = rodriguez_to_mat(rotation_vector, translation_vector)
+#     else:
+#         T = best_T
+#
+#     # global_cur_index = concensus_matches_cur_idx[best_matches_idx]
+#     # global_prev_index = concensus_matches_prev_idx[best_matches_idx]
+#     # global_l_l_index = concensus_matches_l_l_idx[best_matches_idx]
+#     # return T, global_cur_index, global_prev_index, global_l_l_index, best_matches_idx
+#     return best_matches_idx
+
+
 def create_db(path_to_sequence=r"VAN_ex/code/VAN_ex/dataset/sequences/00", num_frames=200):
-    DB = TrackingDB()
+    db = TrackingDB()
     l_prev_img, r_prev_img = ex2.read_images(0)
-    # kp_l_prev, kp_r_prev, desc_l_prev, desc_r_prev, matches_prev = extract_kps_descs_matches(l_prev_img, l_prev_img)
     kp_l_prev, kp_r_prev, desc_l_prev, desc_r_prev, matches_prev = extract_kps_descs_matches(l_prev_img, r_prev_img)
 
     in_prev = np.array([False] * len(matches_prev))
     in_prev_idx = extract_inliers_outliers(kp_l_prev, kp_r_prev, matches_prev)[0]
     in_prev[in_prev_idx] = True
 
-    feature_prev, links_prev = DB.create_links(desc_l_prev, kp_l_prev, kp_r_prev, matches_prev, in_prev)
-    DB.add_frame(links=links_prev, left_features=feature_prev, matches_to_previous_left=None, inliers=None)
-    DB.frameID_to_inliers_percent[0] = 100 * (len(in_prev_idx) / len(matches_prev))
+    feature_prev, links_prev = db.create_links(desc_l_prev, kp_l_prev, kp_r_prev, matches_prev, in_prev)
+    db.add_frame(links=links_prev, left_features=feature_prev, matches_to_previous_left=None, inliers=None)
+    db.frameID_to_inliers_percent[0] = 100 * (len(in_prev_idx) / len(matches_prev))
     # print(f"Frame 0: {DB.frameID_to_inliers_percent[0]}% inliers")
 
     for i in tqdm(range(1, num_frames)):
@@ -419,71 +657,61 @@ def create_db(path_to_sequence=r"VAN_ex/code/VAN_ex/dataset/sequences/00", num_f
 
         # extract the inliers and outliers and triangulate the points
         in_cur_idx = extract_inliers_outliers(kp_l_cur, kp_r_cur, matches_cur)[0]
-        DB.frameID_to_inliers_percent[i] = 100 * (len(in_cur_idx) / len(matches_cur))
-        if DB.frameID_to_inliers_percent[i] < 35:
+
+        db.frameID_to_inliers_percent[i] = 100 * (len(in_cur_idx) / len(matches_cur))
+        if db.frameID_to_inliers_percent[i] < 35:
             print(i)
+
         # print(f"Frame {i}: {DB.frameID_to_inliers_percent[i]}% inliers, num of matches: {len(matches_cur)}")
         in_cur = np.array([False] * len(matches_cur))
         in_cur[in_cur_idx] = True
 
         # create the links for the curr frame:
-        feature_cur, links_cur = DB.create_links(desc_l_cur, kp_l_cur, kp_r_cur, matches_cur, in_cur)
+        feature_cur, links_cur = db.create_links(desc_l_cur, kp_l_cur, kp_r_cur, matches_cur, in_cur)
+
+        prev_features = db.features(i - 1)
 
         # extract matches of first left frame and the second left frame
-        matches_l_l = MATCHER.match(feature_prev, feature_cur)
-        # print(f"matches_l_l: {len(matches_l_l)}")
-
+        # matches_l_l = MATCHER.match(prev_features, feature_cur)
+        # matches_l_l_backward = MATCHER.match(feature_cur, prev_features)
+        matches_l_l = flann.knnMatch(prev_features, feature_cur, k=2)
+        matches_l_l_backward = flann.knnMatch(feature_cur, prev_features, k=2)
         if type(matches_l_l[0]) is tuple:
             matches_l_l = np.array(matches_l_l)
-            matches_l_l = matches_l_l[:, 0]
+            matches_l_l = (matches_l_l[:, 0]).reshape(-1)
         else:
             matches_l_l = np.array(matches_l_l)
+        if type(matches_l_l_backward[0]) is tuple:
+            matches_l_l_backward = np.array(matches_l_l_backward)
+            matches_l_l_backward = (matches_l_l_backward[:, 0]).reshape(-1)
+        else:
+            matches_l_l_backward = np.array(matches_l_l_backward)
 
-        # matches_l_l_mask = np.array([False] * len(feature_prev))
-        # for match in matches_l_l:
-        #     ind = match.queryIdx
-        #     matches_l_l_mask[ind] = True
+        good_idx = []
+        for j, match in enumerate(matches_l_l):
+            feature_in_prev = match.queryIdx
+            matched_feature_idx = match.trainIdx
+            if matches_l_l_backward[matched_feature_idx].trainIdx != feature_in_prev:
+                continue
+            else:
+                good_idx.append(j)
 
-        # agreement_idx, matches_lr0_lr1_ll = find_concensus_points_and_idx(matches_prev, in_prev, matches_l_l,
-        #                                                                   matches_cur, in_cur)
+        good_idx = np.array(good_idx)
+        filtered_matches_l_l = matches_l_l[good_idx]
 
-        inliers_matches_prev = np.array(matches_prev)[in_prev_idx]
-        inlires_matches_cur = np.array(matches_cur)[in_cur_idx]
-        # agreement_idx, matches_lr0_lr1_ll = find_concensus_points_and_idx(matches_prev,
-        #                                                                   in_prev,
-        #                                                                   in_prev_idx, matches_l_l,
-        #                                                                   matches_cur,
-        #                                                                   in_cur, in_cur_idx)
-        agreement_idx, matches_lr0_lr1_ll = extract_agreements(matches_prev,
-                                                               in_prev,
-                                                               in_prev_idx, matches_l_l,
-                                                               matches_cur,
-                                                               in_cur, in_cur_idx)
 
-        best_matches_idx = ransac_pnp_for_tracking_db(
-            matches_l_l, inliers_matches_prev, inlires_matches_cur, agreement_idx, kp_l_prev, kp_r_prev,
-            kp_l_cur,
-            kp_r_cur, matches_lr0_lr1_ll, DB.frameID_to_inliers_percent[i])
+        prev_links = db.all_frame_links(i - 1)
+        best_matches_idx = ransac_pnp_for_tracking_db(filtered_matches_l_l, prev_links, links_cur,
+                                                      db.frameID_to_inliers_percent[i])
+        best_matches_idx = good_idx[best_matches_idx]
 
         in_prev_cur = np.array([False] * len(matches_l_l))
         in_prev_cur[best_matches_idx] = True
 
+        db.add_frame(links_cur, feature_cur, matches_l_l, in_prev_cur)
 
-        DB.add_frame(links_cur, feature_cur, matches_l_l, in_prev_cur)
+    return db
 
-        kp_l_prev, kp_r_prev, desc_l_prev, desc_r_prev, matches_prev = kp_l_cur, kp_r_cur, desc_l_cur, desc_r_cur, matches_cur
-        in_prev, in_prev_idx = in_cur, in_cur_idx
-        feature_prev, links_prev = feature_cur, links_cur
-
-        # feature_prev = feature_cur
-        # matches_prev = matches_cur
-        # in_prev = in_cur
-        # kp_l_prev = kp_l_cur
-        # kp_r_prev = kp_r_cur
-        # desc_l_prev = desc_l_cur
-        # desc_r_prev = desc_r_cur
-        # links_prev = links_cur
-    return DB
 
 def q_4_2(tracking_db: TrackingDB):
     def track_length(tracking_db: TrackingDB, trackId) -> int:
@@ -734,7 +962,7 @@ if __name__ == '__main__':
     # path = r"C:\Users\elyas\University\SLAM video navigation\VAN_ex\code\VAN_ex\dataset\sequences\00"
     # serialized_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/DB_all_after_changing the percent"
     # serialized_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/check50"
-    serialized_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/NEWEST"
+    serialized_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/NEWEST_FLANN"
     path = r"C:\Users\elyas\University\SLAM video navigation\VAN_ex\code\VAN_ex\dataset\sequences\00"
     db = create_db(num_frames=LEN_DATA_SET)
     db.serialize(serialized_path)
@@ -755,4 +983,3 @@ if __name__ == '__main__':
     q_4_6(db)
     q_4_7(db)
     plt.show()
-
