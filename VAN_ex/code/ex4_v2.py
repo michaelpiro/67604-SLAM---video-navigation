@@ -17,27 +17,40 @@ import random
 
 NO_ID = -1
 
-FEATURE = cv2.SIFT_create(enable_precise_upscale = True)
-print(FEATURE.getNFeatures())
-FEATURE.setContrastThreshold(0.08)
-FEATURE.setEdgeThreshold(10)
-FEATURE.setSigma(1.6)
-FEATURE.setNFeatures(1000)
+# FEATURE = cv2.SIFT_create(enable_precise_upscale = True)
+# print(FEATURE.getNFeatures())
+# FEATURE.setContrastThreshold(0.08)
+# FEATURE.setEdgeThreshold(10)
+# FEATURE.setSigma(1.6)
+# FEATURE.setNFeatures(600)
 
 
-# FEATURE = cv2.AKAZE_create()
+FEATURE = cv2.AKAZE_create()
 
-# FEATURE.setNOctaves(2)
-# FEATURE.setThreshold(0.0001)
-# FEATURE.setDescriptorSize(64)
-# FEATURE.setNOctaves(2)
+FEATURE.setNOctaves(2)
+FEATURE.setThreshold(0.008)
+FEATURE.setDescriptorSize(256)
 # FEATURE.setThreshold(0.008)
-# print(FEATURE.getThreshold())
-bf_matcher = cv2.BFMatcher(normType=cv2.NORM_L2, crossCheck=False)
+
+print(FEATURE.getThreshold())
+
 # FLANN parameters
 FLANN_INDEX_KDTREE = 1
 index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
 search_params = dict(checks=50)  # or pass empty dictionary
+
+
+# FEATURE = cv2.SIFT_create(
+#     nfeatures=1000,        # Number of best features to retain
+#     contrastThreshold=0.1,  # Contrast threshold for filtering weak features
+#     edgeThreshold=10,     # Threshold for edge filtering
+#     sigma=1.6             # Gaussian filter sigma
+# )
+
+
+# Create BFMatcher with L2 norm (suitable for KAZE)
+bf_matcher = cv2.BFMatcher(normType=cv2.NORM_L2, crossCheck=False)
+
 
 flann = cv2.FlannBasedMatcher(index_params, search_params)
 MATCHER = bf_matcher
@@ -130,7 +143,7 @@ def extract_inliers_outliers(kp_left, kp_right, matches):
 
         # Use numpy arrays for comparisons
         good_map1 = abs(point_left[1] - point_right[1]) < 2
-        good_map2 = point_left[0] - 3 > point_right[0]
+        good_map2 = point_left[0] > point_right[0]
         # good_map2 = True
         if good_map1 and good_map2:
             inliers.append(match_index)
@@ -432,6 +445,8 @@ def ransac_pnp_for_tracking_db(matches_l_l, prev_links, cur_links, inliers_perce
         filtered_links_prev.append(prev_links[link_index])
 
     points_3d = triangulate_links(filtered_links_prev, P, Q)
+
+
     prev_left_pix_values, prev_right_pix_values = get_pixels_from_links(filtered_links_prev)
     ordered_cur_left_pix_values, ordered_cur_right_pix_values = get_pixels_from_links(filtered_links_cur)
 
@@ -714,6 +729,14 @@ def create_db(path_to_sequence=r"VAN_ex/code/VAN_ex/dataset/sequences/00", num_f
         filtered_matches_l_l = matches_l_l[good_idx]
 
 
+
+        # img_points = np.array([kp_l_cur[match.trainIdx].pt for match in matches_l_l])
+        # points_3d = triangulate_links(links_prev, P, Q)
+        # camera_matrix = np.array([[K[0, 0], 0, K[0, 2]], [0, K[1, 1], K[1, 2]], [0, 0, 1]])
+        # dist_
+        # rvec,tvec,suc, inliers = cv2.solvePnPRansac(points_3d,img_points,camera_matrix,distCoeffs=None)
+
+
         prev_links = db.all_frame_links(i - 1)
         best_matches_idx = ransac_pnp_for_tracking_db(filtered_matches_l_l, prev_links, links_cur,
                                                       db.frameID_to_inliers_percent[i])
@@ -976,9 +999,10 @@ if __name__ == '__main__':
     # path = r"C:\Users\elyas\University\SLAM video navigation\VAN_ex\code\VAN_ex\dataset\sequences\00"
     # serialized_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/DB_all_after_changing the percent"
     # serialized_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/check50"
-    serialized_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/NEWEST_AKAZE_500"
+    serialized_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/NEWEST_AKAZE"
+    # serialized_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/NEWEST_SIFT_500"
     path = r"C:\Users\elyas\University\SLAM video navigation\VAN_ex\code\VAN_ex\dataset\sequences\00"
-    db = create_db(num_frames=500)
+    db = create_db(num_frames=LEN_DATA_SET)
     db.serialize(serialized_path)
 
     db = TrackingDB()

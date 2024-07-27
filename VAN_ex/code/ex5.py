@@ -18,15 +18,15 @@ from ex2 import linear_least_squares_triangulation, read_images
 
 BASE_LINE_SIGN = -1
 
-FEATURE = cv2.AKAZE_create()
-FEATURE.setDescriptorSize(1)
-print(FEATURE.getDescriptorSize())
-print(FEATURE.getNOctaves())
-print(FEATURE.getThreshold())
-
-FEATURE.setNOctaves(2)
-FEATURE.setThreshold(0.005)
-MATCHER = cv2.BFMatcher(normType=cv2.NORM_L2, crossCheck=False)
+# FEATURE = cv2.AKAZE_create()
+# FEATURE.setDescriptorSize(1)
+# print(FEATURE.getDescriptorSize())
+# print(FEATURE.getNOctaves())
+# print(FEATURE.getThreshold())
+#
+# FEATURE.setNOctaves(2)
+# FEATURE.setThreshold(0.005)
+# MATCHER = cv2.BFMatcher(normType=cv2.NORM_L2, crossCheck=False)
 # DATA_PATH = r'C:\Users\elyas\University\SLAM video navigation\VAN_ex\code\VAN_ex\dataset\sequences\00\\'
 DATA_PATH = '/Users/mac/67604-SLAM-video-navigation/VAN_ex/dataset/sequences/00/'
 LEN_DATA_SET = len(os.listdir(DATA_PATH + 'image_0'))
@@ -40,34 +40,6 @@ k_object = gtsam.Cal3_S2Stereo(K[0, 0], K[1, 1], K[0, 1], K[0, 2], K[1, 2], BASE
 
 
 def q_5_1(tracking_db: TrackingDB):
-    def get_feature_location(tracking_db: TrackingDB, frameId: int, trackId: int) -> Tuple[float, float]:
-        link = tracking_db.linkId_to_link[(frameId, trackId)]
-        return link.x_left, link.y
-
-    def visualize_track(tracking_db: TrackingDB, trackId: int):
-        frames = tracking_db.frames(trackId)
-        print(f"Track {trackId} has {len(frames)} frames")
-        plt.figure()
-        for i in range(0, len(frames), 1):
-            # print(f"Frame {frames[i]}")
-            frameId = frames[i]
-            img, _ = read_images(frameId)
-            x_left, y = get_feature_location(tracking_db, frameId, trackId)
-            x_min = int(max(x_left - 10, 0))
-            x_max = int(min(x_left + 10, img.shape[1]))
-            y_min = int(max(y - 10, 0))
-            y_max = int(min(y + 10, img.shape[0]))
-            cutout = img[y_min:y_max, x_min:x_max]
-
-            plt.subplot(len(frames), 2, 2 * i + 1)
-            plt.imshow(img, cmap='gray')
-            plt.scatter(x_left, y, color='red')  # Center of the cutout
-
-            plt.subplot(len(frames), 2, 2 * i + 2)
-            plt.imshow(cutout, cmap='gray')
-            # plt.scatter([10], [10], color='red', marker='x', linewidths=1)  # Center of the cutout
-            if i == 0:
-                plt.title(f"Frame {frameId}, Track {trackId}")
 
     def find_random_track_of_length(tracking_db: TrackingDB, length: int) -> Optional[int]:
         eligible_tracks = [trackId for trackId, frames in tracking_db.trackId_to_frames.items() if
@@ -174,6 +146,7 @@ def q_5_1(tracking_db: TrackingDB):
             err = fac.error(initialEstimate)
             errors[int(track_last_frame - frame)] = err
             print(f"Error for frame {i} factor: {err}, Reprojection error left: {reprojection_error_left}")
+        plot_reprojection_errors(l2_error, errors)
 
         # for i in range(len(frames)):
         #     initialEstimate = gtsam.Values()
@@ -263,10 +236,10 @@ def q_5_1(tracking_db: TrackingDB):
         plt.legend()
         plt.grid(True)
 
+
     trackId = find_random_track_of_length(tracking_db, 12)
-    trackId = 6
-    # plot_reprojection_errors(l2_error, errors)
-    visualize_track(tracking_db, trackId)
+    # trackId = 6
+    # visualize_track(tracking_db, trackId)
     calculate_plot_reprojection_err(find_random_track_of_length, plot_reprojection_errors, tracking_db, trackId)
 
 
@@ -591,7 +564,7 @@ def create_factors_between_keyframes(first_frame_idx, last_frame_idx, db, k_matr
                     initial_estimate.insert(location_symbol, reference_triangulated_point)
 
                 # Create the factor
-                sigma = gtsam.noiseModel.Diagonal.Sigmas(np.array([0.01, 0.01, 0.01]))
+                sigma = gtsam.noiseModel.Diagonal.Sigmas(np.array([0.1, 0.1, 1]))
                 # sigma = gtsam.noiseModel.Isotropic.Sigma(3, 1.0)
 
                 graph.add(
@@ -633,7 +606,7 @@ def q_5_3(db):
     indices = extract_keyframes(db, t)
     # transformations = np.array(read_extrinsic_matrices())
     key_frames = indices[0]
-    key_frames = (0, 10)
+    key_frames = (0, 6)
     # for key_frames in indices:
     # transformations = np.load('transformations_ex3.npy')
     # print(f"keyframes {indices}")
@@ -669,14 +642,16 @@ def q_5_3(db):
         # print(f"Camera {cam} has marginal covariance: {marginals.marginalCovariance(cameras_dict[cam])}")
     marginals.jointMarginalCovariance(keys).fullMatrix()
 
-    plot_trajectory(fignum=0, values=result, marginals=marginals, title='trajectory', scale=1)
-    set_axes_equal(0)
+    # plot_trajectory(fignum=0, values=result, marginals=marginals, title='trajectory', scale=1)
+    # set_axes_equal(0)
 
     # plot_trajectory(fignum=0, values=result, title='trajectory', scale=1)
     # set_axes_equal(0)
     # plt.figure(1)
     # plt.gcf()
     plot_3d_points(fignum=0, values=result, title='3D points')
+
+    plt.show()
 
 
 def q_5_4(db):
@@ -689,9 +664,9 @@ def q_5_4(db):
     t = read_extrinsic_matrices()
     ts = np.array(t)
     keyframes_indices = extract_keyframes(db, t)
-    x = list(range(0,LEN_DATA_SET,2))
+    x = list(range(0,200,5))
     # print(x)
-    keyframes_indices = [(x[i-1],x[i]) for i in range(1,len(x))][0:60]
+    keyframes_indices = [(x[i-1],x[i]) for i in range(1,len(x))]
     # print(f"keyframes {keyframes_indices[-1]}")
     # print(f"last_keyframes {keyframes_indices}")
 
@@ -722,7 +697,7 @@ def q_5_4(db):
         # translation = inv[:3, 3]
         # next = gtsam.Pose3(gtsam.Rot3(rotation), gtsam.Point3(translation))
         # relative = origin.between(next)
-        #
+
         # final_cam_trans = relative.translation()
         # final_cam_rot = relative.rotation().matrix().T
 
@@ -757,32 +732,32 @@ def q_5_4(db):
     last_bundle = bundles[num_bundles - 1]
     last_bundle_result = last_bundle['result']
     graph = last_bundle['graph']
-    # camera_symbol = last_bundle['cameras_dict'][keyframes_indices[-1][0]]
-    #
-    # anchoring_factor = None
-    # num_factors = graph.size()
-    # for i in range(num_factors):
-    #     factor = graph.at(i)
-    #     if isinstance(factor, gtsam.PriorFactorPose3):
-    #         anchoring_factor = factor
-    #         break
-    #
-    # print(f"result error: {graph.error(last_bundle_result)}")
-    # print(f"initial error: {graph.error(last_bundle['initial'])}")
-    # anchoring_factor_error = anchoring_factor.error(last_bundle_result)
-    # print(f"Anchoring factor error: {anchoring_factor_error}")
-    #
-    #
-    # # print_graph_errors(graph, initial, key_frames, result)
-    # # Plot the optimized trajectory
-    #
-    # # worst_factor = print_biggest_error(graph, initial, result)
+    camera_symbol = last_bundle['cameras_dict'][keyframes_indices[-1][0]]
+
+    anchoring_factor = None
+    num_factors = graph.size()
+    for i in range(num_factors):
+        factor = graph.at(i)
+        if isinstance(factor, gtsam.PriorFactorPose3):
+            anchoring_factor = factor
+            break
+
+    print(f"result error: {graph.error(last_bundle_result)}")
+    print(f"initial error: {graph.error(last_bundle['initial'])}")
+    anchoring_factor_error = anchoring_factor.error(last_bundle_result)
+    print(f"Anchoring factor error: {anchoring_factor_error}")
+
+
+    # print_graph_errors(graph, initial, key_frames, result)
+    # Plot the optimized trajectory
+
+    # worst_factor = print_biggest_error(graph, initial, result)
     # print(cameras_locations)
 
     #present the camera locations in 2D
     plt.figure(0)
-    plt.plot([x[0] for x in cameras_locations2], [x[2] for x in cameras_locations2], 'bo', label='ground truth')
-    plt.plot([x[0] for x in cameras_locations], [x[2] for x in cameras_locations], 'ro', )
+    plt.plot([x[0] for x in cameras_locations2], [x[2] for x in cameras_locations2], 'bo', label='ground truth', markersize=7)
+    plt.plot([x[0] for x in cameras_locations], [x[2] for x in cameras_locations], 'ro', markersize=5)
     plt.title('Camera locations in 2D')
 
 
@@ -1178,21 +1153,21 @@ def visualize_track(tracking_db: TrackingDB, trackId: int):
 if __name__ == '__main__':
     all_frames_serialized_db_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/DB3000"
     # serialized_db_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/DB_all_after_changing the percent"
-    serialized_db_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/NEWEST_AKAZE_500"
+    serialized_db_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/NEWEST_AKAZE_200"
     # db = create_DB(path, LEN_DATA_SET)
     # db.serialize(serialized_db_path)
     db = TrackingDB()
     db.load(serialized_db_path)
     # transformations = np.array(read_extrinsic_matrices())
     # find_bad_tracks(0,10,db,k_object,transformations)
-    tracks = db.tracks(105)
-    t =tracks[1]
-    visualize_track(db, t)
-    frames = db.frames(1392)
-    link1 = db.link(frames[0], 1392)
-    link2 = db.link(frames[-1], 1392)
-    print(f"Link1 {link1.x_left, link1.y, link1.x_right}, Link2 {link2.x_left, link2.y, link2.x_right}")
-    plt.show()
+    # tracks = db.tracks(105)
+    # t =tracks[40]
+    # visualize_track(db, t)
+    # frames = db.frames(1392)
+    # link1 = db.link(frames[0], 1392)
+    # link2 = db.link(frames[-1], 1392)
+    # print(f"Link1 {link1.x_left, link1.y, link1.x_right}, Link2 {link2.x_left, link2.y, link2.x_right}")
+    # plt.show()
     # for i in db.frames(393):
     #     link = db.link(i,393)
     #     pose = gtsam.Pose3()
