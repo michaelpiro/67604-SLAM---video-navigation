@@ -1,0 +1,15 @@
+import os
+
+DATA_PATH_WINDOWS = r'C:\Users\elyas\University\SLAM video navigation\VAN_ex\code\VAN_ex\dataset\sequences\00'
+DATA_PATH_MAC = '/Users/mac/67604-SLAM-video-navigation/VAN_ex/dataset/sequences/00/'
+DATA_HEAD_MAC = '/Users/mac/67604-SLAM-video-navigation/VAN_ex'
+# DATA_PATH = r'C:\Users\elyas\University\SLAM video navigation\VAN_ex\code\VAN_ex\dataset\sequences\00\\'
+DATA_HEAD_LINUX = r'/mnt/c/Users/elyas/University/AI/VAN_ex'
+all_frames_serialized_db_path = DATA_HEAD_LINUX + "/docs/DB3000"
+DATA_HEAD_WINDOWS =  r'C:\Users\elyas\University\SLAM video navigation\VAN_ex\code\VAN_ex'
+DATA_PATH_LINUX = DATA_HEAD_LINUX + '/dataset/sequences/00/'
+
+LEN_DATA = len(os.listdir(DATA_PATH_MAC))
+data_path = DATA_PATH_MAC
+DATA_PATH = data_path
+DATA_HEAD = DATA_HEAD_MAC
