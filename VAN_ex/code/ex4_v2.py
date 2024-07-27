@@ -17,8 +17,19 @@ import random
 
 NO_ID = -1
 
-# FEATURE = cv2.SIFT_create()
-FEATURE = cv2.SIFT_create()
+FEATURE = cv2.SIFT_create(enable_precise_upscale = True)
+print(FEATURE.getNFeatures())
+FEATURE.setContrastThreshold(0.08)
+FEATURE.setEdgeThreshold(10)
+FEATURE.setSigma(1.6)
+FEATURE.setNFeatures(1000)
+
+
+# FEATURE = cv2.AKAZE_create()
+
+# FEATURE.setNOctaves(2)
+# FEATURE.setThreshold(0.0001)
+# FEATURE.setDescriptorSize(64)
 # FEATURE.setNOctaves(2)
 # FEATURE.setThreshold(0.008)
 # print(FEATURE.getThreshold())
@@ -113,11 +124,13 @@ def extract_inliers_outliers(kp_left, kp_right, matches):
         ind_left = matches[match_index].queryIdx
         ind_right = matches[match_index].trainIdx
         point_left = kp_left[ind_left].pt
+        x_left = point_left[0]
+        y_left = point_left[1]
         point_right = kp_right[ind_right].pt
 
         # Use numpy arrays for comparisons
         good_map1 = abs(point_left[1] - point_right[1]) < 2
-        good_map2 = point_left[0] > point_right[0] + 2
+        good_map2 = point_left[0] - 3 > point_right[0]
         # good_map2 = True
         if good_map1 and good_map2:
             inliers.append(match_index)
@@ -238,11 +251,12 @@ def transformation_agreement(T, traingulated_pts, prev_left_pix_values, prev_rig
     if x_condition:
         real_x_l = prev_left_pix_values[:, 0]
         real_x_r = prev_right_pix_values[:, 0]
-        cond_x = real_x_l > real_x_r
+        cond_x = real_x_l > real_x_r + 2
     else:
         cond_x = np.ones_like(agree_r0)
     agree_0 = np.logical_and(agree_r0, cond_x, agree_l0)
     # agree_0 = np.array([True] * len(triangulate_points()))
+
 
     transformed_to_l1_points = (K @ l1_4d_points[:3, :]).T
     transformed_to_l1_points = transformed_to_l1_points / transformed_to_l1_points[:, 2][:, np.newaxis]
@@ -260,7 +274,7 @@ def transformation_agreement(T, traingulated_pts, prev_left_pix_values, prev_rig
     if x_condition:
         real_x_l = ordered_cur_left_pix_values[:, 0]
         real_x_r = ordered_cur_right_pix_values[:, 0]
-        cond_x = real_x_l > real_x_r
+        cond_x = real_x_l > real_x_r + 2
     else:
         cond_x = np.ones_like(agree_r1)
     agree_1 = np.logical_and(agree_r1, cond_x, agree_l1)
@@ -458,7 +472,7 @@ def ransac_pnp_for_tracking_db(matches_l_l, prev_links, cur_links, inliers_perce
         #                                          x_condition=True)
 
         points_agreed = transformation_agreement(T, points_3d, prev_left_pix_values, prev_right_pix_values,
-                                                 ordered_cur_left_pix_values, ordered_cur_right_pix_values)
+                                                 ordered_cur_left_pix_values, ordered_cur_right_pix_values, x_condition=True)
 
         num_inliers = np.sum(points_agreed)
         if num_inliers > best_inliers:
@@ -471,7 +485,7 @@ def ransac_pnp_for_tracking_db(matches_l_l, prev_links, cur_links, inliers_perce
 
 
 def calc_ransac_iteration(inliers_percent):
-    sec_prob = 0.9999999
+    sec_prob = 0.9999999999
     outliers_prob = 1 - (inliers_percent / 100)
     min_set_size = 4
     ransac_iterations = int(np.log(1 - sec_prob) / np.log(1 - np.power(1 - outliers_prob, min_set_size))) + 1
@@ -962,9 +976,9 @@ if __name__ == '__main__':
     # path = r"C:\Users\elyas\University\SLAM video navigation\VAN_ex\code\VAN_ex\dataset\sequences\00"
     # serialized_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/DB_all_after_changing the percent"
     # serialized_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/check50"
-    serialized_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/NEWEST_FLANN"
+    serialized_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/NEWEST_AKAZE_500"
     path = r"C:\Users\elyas\University\SLAM video navigation\VAN_ex\code\VAN_ex\dataset\sequences\00"
-    db = create_db(num_frames=LEN_DATA_SET)
+    db = create_db(num_frames=500)
     db.serialize(serialized_path)
 
     db = TrackingDB()
