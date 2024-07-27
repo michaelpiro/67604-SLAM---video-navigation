@@ -12,7 +12,7 @@ from tqdm import tqdm
 import random
 from tracking_database import TrackingDB, Link, MatchLocation
 from ex4 import K, M2, M1, P, Q, triangulate_last_frame
-from gtsam.utils.plot import plot_trajectory
+from gtsam.utils.plot import plot_trajectory, plot_3d_points,set_axes_equal
 from ex3 import rodriguez_to_mat, read_extrinsic_matrices
 from ex2 import linear_least_squares_triangulation, read_images
 
@@ -523,8 +523,7 @@ def calculate_all_relative_transformations(all_transformations, first_frame, las
     return new_trans
 
 
-def create_factors_between_keyframes(graph, first_frame_idx, last_frame_idx, db, k_matrix, initial_estimate,
-                                     transformations):
+def create_factors_between_keyframes(first_frame_idx, last_frame_idx, db, k_matrix, transformations):
     gtsam_frames = dict()
     camera_symbols = dict()
     relevant_tracks = set()
@@ -532,22 +531,25 @@ def create_factors_between_keyframes(graph, first_frame_idx, last_frame_idx, db,
     initial_estimate = gtsam.Values()
     # relative_transformations = calculate_transformation_a_to_b(first_frame_idx, last_frame_idx, transformations)
     relative_transformations = calculate_all_relative_transformations(transformations, first_frame_idx, last_frame_idx)
+    pose_sigma = gtsam.noiseModel.Diagonal.Sigmas(np.array([0.01, 0.01, 0.01, 0.01, 0.01, 0.01]))
     for i in range(last_frame_idx + 1 - first_frame_idx):
         frame_id = first_frame_idx + i
         pose_symbol = gtsam.symbol('c', frame_id)
         camera_pose = relative_transformations[i]
         if i == 0:
-
             pose = gtsam.Pose3()
-            graph.add(gtsam.PriorFactorPose3(pose_symbol, pose, gtsam.noiseModel.Isotropic.Sigma(6, 1.0)))
+
+            graph.add(gtsam.PriorFactorPose3(pose_symbol, pose, pose_sigma))
+            initial_estimate.insert(pose_symbol, pose)
         else:
             last_tracks = set(db.tracks(frame_id - 1))
             this_frame_tracks = set(db.tracks(frame_id))
-            relevant_tracks.update(last_tracks.intersection(this_frame_tracks))
+            intersection = last_tracks.intersection(this_frame_tracks)
+            relevant_tracks.update(intersection)
             rotation = camera_pose[:3, :3]
             translation = camera_pose[:3, 3]
             pose = gtsam.Pose3(gtsam.Rot3(rotation), gtsam.Point3(translation))
-        initial_estimate.insert(pose_symbol, pose)
+            initial_estimate.insert(pose_symbol, pose)
         # Create the stereo camera
         gtsam_frame = gtsam.StereoCamera(pose, k_matrix)
 
@@ -556,33 +558,36 @@ def create_factors_between_keyframes(graph, first_frame_idx, last_frame_idx, db,
 
     for track_id in relevant_tracks:
         tracks_frames = sorted(db.frames(track_id))
-        track_last_frame = db.last_frame_of_track(track_id)
+        track_last_frame = min(db.last_frame_of_track(track_id), last_frame_idx)
+        location_symbol = gtsam.symbol('l', track_id)
         for frame_id in tracks_frames:
             if frame_id > last_frame_idx or frame_id < first_frame_idx:
                 continue
-            location_symbol = gtsam.symbol('l', track_id)
-            pose_symbol = camera_symbols[frame_id]
-            link = db.link(frame_id, track_id)
-            stereo_point2d = link.x_left, link.x_right, link.y
+            else:
+                pose_symbol = camera_symbols[frame_id]
+                link = db.link(frame_id, track_id)
+                stereo_point2d = link.x_left, link.x_right, link.y
 
-            if frame_id == track_last_frame or frame_id == last_frame_idx:
-                # triangulate the point in the last frame
+                if frame_id == track_last_frame or frame_id == last_frame_idx:
+                    # triangulate the point in the last frame
 
-                gtsam_frame = gtsam_frames[frame_id]
-                reference_triangulated_point = gtsam_frame.backproject(
-                    gtsam.StereoPoint2(stereo_point2d[0], stereo_point2d[1], stereo_point2d[2]))
+                    gtsam_frame = gtsam_frames[frame_id]
+                    reference_triangulated_point = gtsam_frame.backproject(
+                        gtsam.StereoPoint2(stereo_point2d[0], stereo_point2d[1], stereo_point2d[2]))
 
-                initial_estimate.insert(location_symbol, reference_triangulated_point)
+                    initial_estimate.insert(location_symbol, reference_triangulated_point)
 
-            # Create the factor
-            sigma = gtsam.noiseModel.Isotropic.Sigma(3, 1.0)
+                # Create the factor
+                sigma = gtsam.noiseModel.Diagonal.Sigmas(np.array([0.01, 0.01, 0.1]))
+                # sigma = gtsam.noiseModel.Isotropic.Sigma(3, 1.0)
 
-            graph.add(
-                gtsam.GenericStereoFactor3D(gtsam.StereoPoint2(link.x_left, link.x_right, link.y), sigma, pose_symbol,
-                                            location_symbol,
-                                            k_object))
+                graph.add(
+                    gtsam.GenericStereoFactor3D(gtsam.StereoPoint2(link.x_left, link.x_right, link.y), sigma,
+                                                pose_symbol,
+                                                location_symbol,
+                                                k_object))
 
-    return graph, initial_estimate
+    return graph, initial_estimate, camera_symbols, gtsam_frames
 
 
 def get_inverse(first):
@@ -607,6 +612,7 @@ def translate_later_t_to_older_t(later_t, older_t):
 MAX_SIZE_KEYFRAME = 20
 
 
+
 def q_5_3(db):
     graph_initial_dict = dict()
     i = 0
@@ -615,15 +621,176 @@ def q_5_3(db):
     indices = extract_keyframes(db, t)
     # transformations = np.array(read_extrinsic_matrices())
     key_frames = indices[0]
+    key_frames= (0,10)
     # for key_frames in indices:
-        # transformations = np.load('transformations_ex3.npy')
-        # print(f"keyframes {indices}")
-        # print(f"keyframes {indices}")
+    # transformations = np.load('transformations_ex3.npy')
+    # print(f"keyframes {indices}")
+    # print(f"keyframes {indices}")
 
-    graph, initial = create_graph(db, key_frames[0], key_frames[1], ts)
+    graph, initial, cameras_dict, frames_dict = create_graph(db, key_frames[0], key_frames[1], ts)
 
     optimizer = gtsam.LevenbergMarquardtOptimizer(graph, initial)
     result = optimizer.optimize()
+
+    print_graph_errors(graph, initial, key_frames, result)
+    # Plot the optimized trajectory
+
+    worst_factor = print_biggest_error(graph, initial, result)
+
+    camera_symbol = worst_factor.keys()[0]
+    location_symbol = worst_factor.keys()[1]
+
+    present_error(camera_symbol, initial, result, location_symbol, worst_factor, title1='Before optimization',
+                  title2='After optimization')
+
+    # print(f"Initial estimation projected to camera: {stereo_cam.project(initial_stereo_point)}")
+
+    # cameras
+    marginals = gtsam.Marginals(graph, result)
+    keys = gtsam.KeyVector()
+    # fig = plt.figure(0)
+    # axes = fig.add_subplot(projection='3d')
+
+    for cam in cameras_dict.keys():
+
+        keys.append(cameras_dict[cam])
+        # print(f"Camera {cam} has marginal covariance: {marginals.marginalCovariance(cameras_dict[cam])}")
+    marginals.jointMarginalCovariance(keys).fullMatrix()
+
+    plot_trajectory(fignum=0, values=result, marginals=marginals, title='trajectory', scale=1)
+    set_axes_equal(0)
+
+    # plot_trajectory(fignum=0, values=result, title='trajectory', scale=1)
+    # set_axes_equal(0)
+    # plt.figure(1)
+    # plt.gcf()
+    plot_3d_points(fignum=0, values=result, title='3D points')
+
+
+def q_5_4(db):
+    graph_initial_dict = dict()
+    i = 0
+    t = read_extrinsic_matrices()
+    ts = np.array(t)
+    indices = extract_keyframes(db, t)
+    # transformations = np.array(read_extrinsic_matrices())
+    for key_frames in indices:
+    # transformations = np.load('transformations_ex3.npy')
+    # print(f"keyframes {indices}")
+    # print(f"keyframes {indices}")
+
+        graph, initial, cameras_dict, frames_dict = create_graph(db, key_frames[0], key_frames[1], ts)
+
+        optimizer = gtsam.LevenbergMarquardtOptimizer(graph, initial)
+        result = optimizer.optimize()
+
+
+
+    print_graph_errors(graph, initial, key_frames, result)
+    # Plot the optimized trajectory
+
+    worst_factor = print_biggest_error(graph, initial, result)
+
+
+
+def present_error(camera_symbol, initial, result, location_symbol, worst_factor, title1='', title2=''):
+    stereo_cam = gtsam.StereoCamera(initial.atPose3(camera_symbol), k_object)
+    # initial_stereo_point = gtsam.StereoPoint2(initial.atPoint3(location_symbol)[0],
+    #                                           initial.atPoint3(location_symbol)[1],
+    #                                           initial.atPoint3(location_symbol)[2])
+    measurement = worst_factor.measured()
+    location = initial.atPoint3(location_symbol)
+    projected_point = stereo_cam.project(location)
+    projected_left_cam = projected_point.uL(), projected_point.v()
+    projected_right_cam = projected_point.uR(), projected_point.v()
+    camera_number = int(gtsam.DefaultKeyFormatter(camera_symbol)[1:])
+    img_left, img_right = read_images(camera_number)
+    measurement_left = measurement.uL(), measurement.v()
+    measurement_right = measurement.uR(), measurement.v()
+    distance_left = round(np.linalg.norm(np.array(measurement_left) - np.array(projected_left_cam)), 2)
+    distance_right = round(np.linalg.norm(np.array(measurement_right) - np.array(projected_right_cam)), 2)
+    fig, axs = plt.subplots(2, 2, figsize=(10, 5))
+    axs[0, 0].title.set_text(f"Left camera {camera_number}, distance: {distance_left} {title1}")
+    axs[0, 0].imshow(img_left, cmap='gray')
+    axs[0, 0].scatter(*projected_left_cam, c='r', label='Projection')
+    axs[0, 0].scatter(*measurement_left, c='g', label='Measurement')
+    axs[0, 0].legend()
+    axs[0, 1].title.set_text(f"Right camera {camera_number}, distance: {distance_right} {title1}")
+    axs[0, 1].imshow(img_right, cmap='gray')
+    axs[0, 1].scatter(*projected_right_cam, c='r', label='Projection')
+    axs[0, 1].scatter(*measurement_right, c='g', label='Measurement')
+    axs[0, 1].legend()
+
+    world_point = stereo_cam.backproject(measurement)
+    print(f"point in the global coordinate system before optimization: {world_point}")
+    print(f"estimated location by the camera: {location}")
+    distance_in_meters = np.linalg.norm(world_point - np.array(location))
+    print(f"Distance in meters: {distance_in_meters}")
+
+    stereo_cam = gtsam.StereoCamera(result.atPose3(camera_symbol), k_object)
+    location = result.atPoint3(location_symbol)
+    projected_point = stereo_cam.project(location)
+    projected_left_cam = projected_point.uL(), projected_point.v()
+    projected_right_cam = projected_point.uR(), projected_point.v()
+    camera_number = int(gtsam.DefaultKeyFormatter(camera_symbol)[1:])
+    img_left, img_right = read_images(camera_number)
+    measurement_left = measurement.uL(), measurement.v()
+    measurement_right = measurement.uR(), measurement.v()
+    distance_left = round(np.linalg.norm(np.array(measurement_left) - np.array(projected_left_cam)), 2)
+    distance_right = round(np.linalg.norm(np.array(measurement_right) - np.array(projected_right_cam)), 2)
+    axs[1, 0].title.set_text(f"Left camera {camera_number}, distance: {distance_left} {title2}")
+    axs[1, 0].imshow(img_left, cmap='gray')
+    axs[1, 0].scatter(*projected_left_cam, c='r', label='Projection')
+    axs[1, 0].scatter(*measurement_left, c='g', label='Measurement')
+    axs[1, 0].legend()
+    axs[1, 1].title.set_text(f"Right camera {camera_number}, distance: {distance_right} {title2}")
+    axs[1, 1].imshow(img_right, cmap='gray')
+    axs[1, 1].scatter(*projected_right_cam, c='r', label='Projection')
+    axs[1, 1].scatter(*measurement_right, c='g', label='Measurement')
+    axs[1, 1].legend()
+
+    world_point = stereo_cam.backproject(measurement)
+    print(f"point in the global coordinate system after optimization: {world_point}")
+    print(f"estimated location by the camera: {location}")
+    distance_in_meters = np.linalg.norm(world_point - np.array(location))
+    print(f"Distance in meters: {distance_in_meters}")
+    # plt.show()
+
+
+def project_point_to_cam(initial, result, worst_factor):
+    camera_symbol = worst_factor.keys()[0]
+    location_symbol = worst_factor.keys()[1]
+    print(f"Initial triangulated point: {initial.atPoint3(location_symbol)}")
+    print(f"Final triangulated point: {result.atPoint3(location_symbol)}")
+    print(f"Initial camera pose: {initial.atPose3(camera_symbol)}")
+    print(f"Final camera pose: {result.atPose3(camera_symbol)}")
+
+    stereo_cam = gtsam.StereoCamera(initial.atPose3(camera_symbol), k_object)
+    initial_stereo_point = gtsam.StereoPoint2(initial.atPoint3(location_symbol)[0],
+                                              initial.atPoint3(location_symbol)[1],
+                                              initial.atPoint3(location_symbol)[2])
+    initial_projected_point = stereo_cam.project(initial_stereo_point)
+    print(f"Initial estimation projected to camera: {stereo_cam.project(initial_stereo_point)}")
+    after_opt_stereo_point = gtsam.StereoPoint2(result.atPoint3(location_symbol)[0],
+                                                result.atPoint3(location_symbol)[1],
+                                                result.atPoint3(location_symbol)[2])
+    return after_opt_stereo_point, stereo_cam
+
+
+def print_biggest_error(graph, initial, result):
+    worst_factor = None
+    num_factors = graph.size()
+    for i in range(num_factors):
+        factor = graph.at(i)
+        if isinstance(factor, gtsam.GenericStereoFactor3D):
+            if worst_factor is None or factor.error(initial) > worst_factor.error(initial):
+                worst_factor = factor
+    print(f"Worst factor error: {worst_factor.error(initial)}")
+    print(f"Worst factor error after optimization: {worst_factor.error(result)}")
+    return worst_factor
+
+
+def print_graph_errors(graph, initial, key_frames, result):
     initial_error = graph.error(initial)
     final_error = graph.error(result)
     num_factors = graph.size()
@@ -633,40 +800,6 @@ def q_5_3(db):
     print(f"Number of factors: {num_factors}")
     print(f"Average factor error before optimization: {initial_error / num_factors}")
     print(f"Average factor error after optimization: {final_error / num_factors}")
-    # Plot the optimized trajectory
-
-
-    worst_factor = None
-    for i in range(num_factors):
-        factor = graph.at(i)
-        if isinstance(factor, gtsam.GenericStereoFactor3D):
-            if worst_factor is None or factor.error(result) > worst_factor.error(result):
-                worst_factor = factor
-
-    print(f"Worst factor error: {worst_factor.error(initial)}")
-    camera_symbol = worst_factor.keys()[0]
-    print(f"Camera symbol: {camera_symbol}")
-    location_symbol = worst_factor.keys()[1]
-    print(f"Location symbol: {location_symbol}")
-    print(f"Initial triangulated point: {initial.atPoint3(location_symbol)}")
-    print(f"Final triangulated point: {result.atPoint3(location_symbol)}")
-    print(f"Initial camera pose: {initial.atPose3(camera_symbol)}")
-    # stereo_cam = gtsam.StereoCamera(initial.atPose3(worst_factor.poseKey()), k_object)
-    stereo_point = gtsam.StereoPoint2(worst_factor.measured()[0], worst_factor.measured()[1], worst_factor.measured()[2])
-    print(f"Initial triangulated point: {stereo_cam.backproject(stereo_point)}")
-    stereo_cam = gtsam.StereoCamera(result.atPose3(worst_factor.poseKey()), k_object)
-    stereo_point = gtsam.StereoPoint2(worst_factor.measured()[0], worst_factor.measured()[1], worst_factor.measured()[2])
-    print(f"Final triangulated point: {stereo_cam.backproject(stereo_point)}")
-
-
-
-
-    # plot_trajectory(fignum=0, values=result, title='trajectory')
-
-    # 2D Plot from above
-    # fig, ax = plt.subplots()
-
-    # Extract the poses for keyframes
 
 
 #     keyframe_positions = [result.atPose3(gtsam.symbol('c', i[0])).translation() for i in indices]
@@ -712,7 +845,7 @@ def q_5_3(db):
 def transform_to_gtsam_pose(frame_idx, transformations, frames):
     reference_transform = transformations[frames[0]]
     transform = transformations[frame_idx]
-    relavite = translate_later_t_to_older_t(transform,reference_transform)
+    relavite = translate_later_t_to_older_t(transform, reference_transform)
     return relavite
 
 
@@ -732,7 +865,6 @@ def add_camera_poses(graph, transformations, frames, initial):
         if i == 0:
             graph.add(gtsam.PriorFactorPose3(camera_symbol, pose, gtsam.noiseModel.Isotropic.Sigma(6, 1.0)))
     return camera_symbols, frame_objects
-
 
 
 def optimize_track(db, track_id, transformations, fist_frame_idx, last_frame_idx):
@@ -768,7 +900,6 @@ def optimize_track(db, track_id, transformations, fist_frame_idx, last_frame_idx
     result = optimizer.optimize()
     if graph.error(result) > 0.5:
         print(f"error after optimization {graph.error(result)}, track {track_id} frames {len(frames)} ")
-
 
 
 def find_bad_tracks(first_frame_idx, last_frame_idx, db, k_matrix,
@@ -918,14 +1049,16 @@ def create_graph(db, first_frame_idx, last_frame_idx, transformations):
     graph = gtsam.NonlinearFactorGraph()
     initial_estimate = gtsam.Values()
     k_matrix = k_object
-    graph, initial_estimate = create_factors_between_keyframes(graph, first_frame_idx, last_frame_idx, db, k_matrix,
-                                                               initial_estimate, transformations)
-    return graph, initial_estimate
+    graph, initial_estimate, cameras, frames = create_factors_between_keyframes(first_frame_idx, last_frame_idx, db,
+                                                                                k_matrix,
+                                                                                transformations)
+    return graph, initial_estimate, cameras, frames
 
 
 def get_feature_location(tracking_db: TrackingDB, frameId: int, trackId: int) -> Tuple[float, float]:
     link = tracking_db.linkId_to_link[(frameId, trackId)]
     return link.x_left, link.y
+
 
 def visualize_track(tracking_db: TrackingDB, trackId: int):
     frames = tracking_db.frames(trackId)
@@ -952,17 +1085,26 @@ def visualize_track(tracking_db: TrackingDB, trackId: int):
         if i == 0:
             plt.title(f"Frame {frameId}, Track {trackId}")
 
+
 if __name__ == '__main__':
     all_frames_serialized_db_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/DB3000"
     # serialized_db_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/DB_all_after_changing the percent"
-    serialized_db_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/NEWEST_SIFT"
+    serialized_db_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/NEWEST_FLANN"
     # db = create_DB(path, LEN_DATA_SET)
     # db.serialize(serialized_db_path)
     db = TrackingDB()
     db.load(serialized_db_path)
-    transformations = np.array( read_extrinsic_matrices())
+    # transformations = np.array(read_extrinsic_matrices())
     # find_bad_tracks(0,10,db,k_object,transformations)
-    # visualize_track(db,53475)
+    # visualize_track(db,393)
+    # for i in db.frames(393):
+    #     link = db.link(i,393)
+    #     pose = gtsam.Pose3()
+    #     first_frame_cam = gtsam.StereoCamera(pose, k_object)
+    #     p = gtsam.StereoPoint2(link.x_left, link.y, link.x_right)
+    #     world_point_tr = linear_least_squares_triangulation(P,Q,(link.x_left, link.y), (link.x_right, link.y))
+    #     world_point = first_frame_cam.backproject(p)
+    #     print(f" frame {i} : {world_point}, triangulated {world_point_tr}")
     # plt.show()
 
     # q_5_1(db)
@@ -970,6 +1112,7 @@ if __name__ == '__main__':
     #     frames = sorted(db.frames(track))
     #     optimize_track(db,track,transformations,frames[0],frames[-1])
     q_5_3(db)
+    plt.show()
     #
     # i = 0
     # for j in range(12):
@@ -986,4 +1129,3 @@ if __name__ == '__main__':
     # plt.show()
     # q_5_1(db)
     # plt.show()
-

@@ -29,7 +29,7 @@ index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
 search_params = dict(checks=50)  # or pass empty dictionary
 
 flann = cv2.FlannBasedMatcher(index_params, search_params)
-MATCHER = flann
+MATCHER = bf_matcher
 # MATCHER = bf_matcher
 
 # MATCHER2 = cv2.BFMatcher(normType=cv2.NORM_HAMMING, crossCheck=False)
@@ -117,7 +117,7 @@ def extract_inliers_outliers(kp_left, kp_right, matches):
 
         # Use numpy arrays for comparisons
         good_map1 = abs(point_left[1] - point_right[1]) < 2
-        good_map2 = point_left[0] > point_right[0]
+        good_map2 = point_left[0] > point_right[0] + 2
         # good_map2 = True
         if good_map1 and good_map2:
             inliers.append(match_index)
@@ -672,10 +672,10 @@ def create_db(path_to_sequence=r"VAN_ex/code/VAN_ex/dataset/sequences/00", num_f
         prev_features = db.features(i - 1)
 
         # extract matches of first left frame and the second left frame
-        # matches_l_l = MATCHER.match(prev_features, feature_cur)
-        # matches_l_l_backward = MATCHER.match(feature_cur, prev_features)
-        matches_l_l = flann.knnMatch(prev_features, feature_cur, k=2)
-        matches_l_l_backward = flann.knnMatch(feature_cur, prev_features, k=2)
+        matches_l_l = MATCHER.match(prev_features, feature_cur)
+        matches_l_l_backward = MATCHER.match(feature_cur, prev_features)
+        # matches_l_l = flann.knnMatch(prev_features, feature_cur, k=2)
+        # matches_l_l_backward = flann.knnMatch(feature_cur, prev_features, k=2)
         if type(matches_l_l[0]) is tuple:
             matches_l_l = np.array(matches_l_l)
             matches_l_l = (matches_l_l[:, 0]).reshape(-1)
