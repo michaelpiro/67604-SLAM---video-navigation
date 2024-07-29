@@ -7,10 +7,10 @@ import cv2
 import pickle
 from typing import List, Tuple, Dict, Sequence, Optional
 from timeit import default_timer as timer
-from tracking_database import TrackingDB, Link, MatchLocation
+from utils.tracking_database import TrackingDB, Link, MatchLocation
 from tqdm import tqdm
 import random
-from tracking_database import TrackingDB, Link, MatchLocation
+from utils.tracking_database import TrackingDB, Link, MatchLocation
 from ex4 import K, M2, M1, P, Q, triangulate_last_frame
 from gtsam.utils.plot import plot_trajectory, plot_3d_points, set_axes_equal
 from ex3 import rodriguez_to_mat, read_extrinsic_matrices
@@ -40,7 +40,6 @@ k_object = gtsam.Cal3_S2Stereo(K[0, 0], K[1, 1], K[0, 1], K[0, 2], K[1, 2], BASE
 
 
 def q_5_1(tracking_db: TrackingDB):
-
     def find_random_track_of_length(tracking_db: TrackingDB, length: int) -> Optional[int]:
         eligible_tracks = [trackId for trackId, frames in tracking_db.trackId_to_frames.items() if
                            len(frames) >= length]
@@ -236,7 +235,6 @@ def q_5_1(tracking_db: TrackingDB):
         plt.legend()
         plt.grid(True)
 
-
     trackId = find_random_track_of_length(tracking_db, 12)
     # trackId = 6
     # visualize_track(tracking_db, trackId)
@@ -277,12 +275,17 @@ def q_5_1(tracking_db: TrackingDB):
 def get_relevant_tracks_in_keyframes(db, first_frame_idx, last_frame_idx):
     tracks = []
     all_tracks = set()
-    frame_set = set(range(first_frame_idx, last_frame_idx + 1))
-    for i in range(first_frame_idx, last_frame_idx + 1):
+    frame_set = set(db.tracks(first_frame_idx))
+    for i in range(first_frame_idx+1, last_frame_idx+1):
         current_frame_id = i
-        last_frame_idx = i - 1
+        current_frame_tracks = set(db.tracks(current_frame_id))
+        # intersection = frame_set.intersection(current_frame_tracks)
+        # all_tracks.update(intersection)
+        # frame_set = current_frame_tracks
+        all_tracks.update(current_frame_tracks)
+
         # common_tracks = set(db.tracks(current_frame_id)).intersection(set(db.tracks(last_frame_idx)))
-        all_tracks.update(db.tracks(current_frame_id))
+        # all_tracks.update(db.tracks(current_frame_id))
     return all_tracks
     for track_id in all_tracks:
         length = len(db.frames(track_id))
@@ -292,36 +295,44 @@ def get_relevant_tracks_in_keyframes(db, first_frame_idx, last_frame_idx):
     return tracks
 
 
-def calculate_transformations(db: TrackingDB, first_frame_idx, last_frame_idx, last_frame_transform=M1):
+def calculate_transformations(db: TrackingDB, first_frame_idx, last_frame_idx):
     transformations = dict()
-    transformations[first_frame_idx] = last_frame_transform
+    transformations[0] = np.vstack((M1, np.array([0, 0, 0, 1])))
 
-    common_tracks = set(db.tracks(first_frame_idx)).intersection(
-        set(db.tracks(last_frame_idx)))
-    links_last_frame = [db.link(last_frame_idx, track_id) for track_id in common_tracks]
-    links_first_frame = [db.link(first_frame_idx, track_id) for track_id in common_tracks]
+    for i in range(1,last_frame_idx-first_frame_idx+1):
+        current_frame_id = i
+        prev_frame_id = current_frame_id - 1
+        last_frame_transform = transformations[prev_frame_id]
 
-    # calculate the transformation between the two frames
-    # traingulate the links
-    triangulated_links = triangulate_last_frame(db, P, Q, links_first_frame)
-    if len(triangulated_links) < 4:
-        raise Exception("Not enough points to triangulate and perform PnP")
-    # calculate the transformation
-    diff_coeff = np.zeros((5, 1))
-    links_last_frame = np.array(links_last_frame)
-    img_points = np.array([(link.x_left, link.y) for link in links_last_frame])
-    # links_current_frame = np.array(links_current_frame)
-    success, rotation_vector, translation_vector = cv2.solvePnP(triangulated_links, img_points, K,
-                                                                distCoeffs=diff_coeff, flags=cv2.SOLVEPNP_EPNP)
+        # get the relevant tracks
+        common_tracks = list(set(db.tracks(current_frame_id)).intersection(
+            set(db.tracks(prev_frame_id))))
+        links_last_frame = [db.link(prev_frame_id, track_id) for track_id in common_tracks]
+        links_first_frame = [db.link(current_frame_id, track_id) for track_id in common_tracks]
 
-    new_trans = rodriguez_to_mat(rotation_vector, translation_vector) if success else None
-    if new_trans is None:
-        raise Exception("PnP failed")
+        # calculate the transformation between the two frames
+        # traingulate the links
+        triangulated_links = triangulate_last_frame(db, P, Q, links_last_frame)
+        if len(triangulated_links) < 4:
+            raise Exception("Not enough points to triangulate and perform PnP")
+        # calculate the transformation
+        diff_coeff = np.zeros((5, 1))
+        links_first_frame = np.array(links_first_frame)
+        img_points = np.array([(link.x_left, link.y) for link in links_first_frame])
+        # links_current_frame = np.array(links_current_frame)
+        success, rotation_vector, translation_vector = cv2.solvePnP(triangulated_links, img_points, K,
+                                                                    distCoeffs=diff_coeff, flags=cv2.SOLVEPNP_EPNP)
+
+        inv_t = rodriguez_to_mat(rotation_vector, translation_vector) if success else None
+        if inv_t is None:
+            raise Exception("PnP failed")
+        new_trans = get_inverse(inv_t)
+        transformations[current_frame_id] = get_inverse(new_trans @ last_frame_transform)
 
     # last_transform = transformations[last_frame_id]
     # global_transform = new_trans @ np.vstack((last_transform, np.array([0, 0, 0, 1])))
     # transformations[current_frame_id] = global_transform
-    return new_trans
+    return transformations
 
 
 def calculate_transformation_a_to_b(first_frame_idx, last_frame_idx, transformations):
@@ -499,14 +510,13 @@ def calculate_all_relative_transformations_to_gtsam(all_transformations, first_f
     t_first = all_transformations[first_frame][:3, 3]
     inverse = get_inverse(all_transformations[first_frame])
     for trans in all_transformations[first_frame: last_frame + 1]:
-        t_inv = get_inverse(inverse @ np.vstack((trans,np.array([0, 0, 0, 1]))))
+        t_inv = get_inverse(inverse @ np.vstack((trans, np.array([0, 0, 0, 1]))))
+        # t_inv = inverse @ np.vstack((trans, np.array([0, 0, 0, 1])))
         # rel_transformation = np.hstack((new_r, new_t.reshape(-1, 1)))
         # rel_transformation = get_inverse(rel_transformation)
         new_trans.append(t_inv)
 
     return new_trans
-
-
 
 
 def create_factors_between_keyframes(first_frame_idx, last_frame_idx, db, k_matrix, transformations):
@@ -516,17 +526,26 @@ def create_factors_between_keyframes(first_frame_idx, last_frame_idx, db, k_matr
     graph = gtsam.NonlinearFactorGraph()
     initial_estimate = gtsam.Values()
     # relative_transformations = calculate_transformation_a_to_b(first_frame_idx, last_frame_idx, transformations)
-    relative_transformations = calculate_all_relative_transformations_to_gtsam(transformations, first_frame_idx, last_frame_idx)
+    # relative_transformations = calculate_all_relative_transformations_to_gtsam(transformations, first_frame_idx,
+    #                                                                            last_frame_idx)
+    relative_transformations = calculate_transformations(db ,first_frame_idx, last_frame_idx)
     pose_sigma = gtsam.noiseModel.Diagonal.Sigmas(np.array([0.01, 0.01, 0.01, 0.01, 0.01, 0.01]))
+    last_camera = None
     for i in range(last_frame_idx + 1 - first_frame_idx):
         frame_id = first_frame_idx + i
         pose_symbol = gtsam.symbol('c', frame_id)
         camera_pose = relative_transformations[i]
+
         if i == 0:
             pose = gtsam.Pose3()
-
             graph.add(gtsam.PriorFactorPose3(pose_symbol, pose, pose_sigma))
             initial_estimate.insert(pose_symbol, pose)
+            gtsam_frame = gtsam.StereoCamera(pose, k_matrix)
+            last_camera = pose
+            gtsam_frames[frame_id] = gtsam_frame
+            camera_symbols[frame_id] = pose_symbol
+            continue
+
         else:
             last_tracks = set(db.tracks(frame_id - 1))
             this_frame_tracks = set(db.tracks(frame_id))
@@ -535,15 +554,18 @@ def create_factors_between_keyframes(first_frame_idx, last_frame_idx, db, k_matr
             rotation = camera_pose[:3, :3]
             translation = camera_pose[:3, 3]
             pose = gtsam.Pose3(gtsam.Rot3(rotation), gtsam.Point3(translation))
+            # graph.add(gtsam.PriorFactorPose3(pose_symbol, pose, pose_sigma))
             initial_estimate.insert(pose_symbol, pose)
         # Create the stereo camera
         gtsam_frame = gtsam.StereoCamera(pose, k_matrix)
-
+        # relative_pose = last_camera.between(pose)
+        # graph.add(gtsam.BetweenFactorPose3(camera_symbols[frame_id-1], pose_symbol, relative_pose, pose_sigma))
         gtsam_frames[frame_id] = gtsam_frame
         camera_symbols[frame_id] = pose_symbol
-
+        # last_camera = pose
+    relevant_tracks = list(get_relevant_tracks_in_keyframes(db, first_frame_idx, last_frame_idx))
     for track_id in relevant_tracks:
-        tracks_frames = sorted(db.frames(track_id))
+        tracks_frames = sorted(db.frames(track_id), reverse=True)
         track_last_frame = min(db.last_frame_of_track(track_id), last_frame_idx)
         location_symbol = gtsam.symbol('l', track_id)
         for frame_id in tracks_frames:
@@ -553,6 +575,7 @@ def create_factors_between_keyframes(first_frame_idx, last_frame_idx, db, k_matr
                 pose_symbol = camera_symbols[frame_id]
                 link = db.link(frame_id, track_id)
                 stereo_point2d = link.x_left, link.x_right, link.y
+                assert stereo_point2d[0] > stereo_point2d[1]
 
                 if frame_id == track_last_frame or frame_id == last_frame_idx:
                     # triangulate the point in the last frame
@@ -561,10 +584,16 @@ def create_factors_between_keyframes(first_frame_idx, last_frame_idx, db, k_matr
                     reference_triangulated_point = gtsam_frame.backproject(
                         gtsam.StereoPoint2(stereo_point2d[0], stereo_point2d[1], stereo_point2d[2]))
 
+                    if reference_triangulated_point[2] < 0:
+                        print(f"Negative depth for track {track_id} in frame {frame_id}!, {stereo_point2d}")
+                        break
+
+
                     initial_estimate.insert(location_symbol, reference_triangulated_point)
 
                 # Create the factor
-                sigma = gtsam.noiseModel.Diagonal.Sigmas(np.array([0.1, 0.1, 1]))
+                n = np.array([0.2, 0.2, 0.1])*(track_last_frame-frame_id+1) + np.array([1, 1, 1])
+                sigma = gtsam.noiseModel.Diagonal.Sigmas(n)
                 # sigma = gtsam.noiseModel.Isotropic.Sigma(3, 1.0)
 
                 graph.add(
@@ -588,13 +617,6 @@ def translate_later_t_to_older_t(later_t, older_t):
     return older_t @ get_inverse(later_t)
 
 
-# def extract_keyframes(db):
-#     frames = db.frames()
-#     keyframe_indices = []
-#     for i in range(len(frames) - 1):
-#         if frames[i + 1] - frames[i] > 1:
-#             keyframe_indices.append((frames[i], frames[i + 1]))
-#     return keyframe_indices
 MAX_SIZE_KEYFRAME = 20
 
 
@@ -663,15 +685,16 @@ def q_5_4(db):
     i = 0
     t = read_extrinsic_matrices()
     ts = np.array(t)
-    keyframes_indices = extract_keyframes(db, t)
-    x = list(range(0,200,5))
+    keyframes_indices = extract_keyframes(db, t)[:]
+    print(f"keyframes {[k[1]-k[0] for k in keyframes_indices]}")
+    # keyframes_indices = [(i,i+1) for i in range(0,2500,1)]
+    # x = list(range(0,200,5))
     # print(x)
-    keyframes_indices = [(x[i-1],x[i]) for i in range(1,len(x))]
+    # keyframes_indices = [(x[i-1],x[i]) for i in range(1,len(x))]
     # print(f"keyframes {keyframes_indices[-1]}")
     # print(f"last_keyframes {keyframes_indices}")
 
-
-    #inserting the first pose to the keyframes_poses
+    # inserting the first pose to the keyframes_poses
     key_frames_poses[0] = gtsam.Pose3()
     for i, key_frames in enumerate(keyframes_indices):
         graph, initial, cameras_dict, frames_dict = create_graph(db, key_frames[0], key_frames[1], ts)
@@ -710,9 +733,6 @@ def q_5_4(db):
         global_transformation = global_transformation[:3, :]
         cameras_matrix.append(global_transformation)
 
-
-
-
     cameras_locations = []
     for cam in cameras_matrix:
         rot = cam[:3, :3]
@@ -725,15 +745,21 @@ def q_5_4(db):
         t = cam[:3, 3]
         cameras_locations2.append(-rot.T @ t)
 
+    distance = []
+    for i in range(len(cameras_locations)):
+        distance.append(np.linalg.norm(cameras_locations[i] - cameras_locations2[i]))
+
+    print_q_5_4(bundles, cameras_locations, cameras_locations2, distance, keyframes_indices)
+
+
+def print_q_5_4(bundles, cameras_locations, cameras_locations2, distance, keyframes_indices):
     first_cam_last_bundle = cameras_locations[-2]
     print(f"first camera of last bundle: {first_cam_last_bundle}")
-
     num_bundles = len(bundles)
     last_bundle = bundles[num_bundles - 1]
     last_bundle_result = last_bundle['result']
     graph = last_bundle['graph']
     camera_symbol = last_bundle['cameras_dict'][keyframes_indices[-1][0]]
-
     anchoring_factor = None
     num_factors = graph.size()
     for i in range(num_factors):
@@ -741,24 +767,24 @@ def q_5_4(db):
         if isinstance(factor, gtsam.PriorFactorPose3):
             anchoring_factor = factor
             break
-
     print(f"result error: {graph.error(last_bundle_result)}")
     print(f"initial error: {graph.error(last_bundle['initial'])}")
     anchoring_factor_error = anchoring_factor.error(last_bundle_result)
     print(f"Anchoring factor error: {anchoring_factor_error}")
-
-
     # print_graph_errors(graph, initial, key_frames, result)
     # Plot the optimized trajectory
-
     # worst_factor = print_biggest_error(graph, initial, result)
     # print(cameras_locations)
-
-    #present the camera locations in 2D
-    plt.figure(0)
-    plt.plot([x[0] for x in cameras_locations2], [x[2] for x in cameras_locations2], 'bo', label='ground truth', markersize=7)
+    # present the camera locations in 2D
+    plt.figure()
+    plt.plot([x[0] for x in cameras_locations2], [x[2] for x in cameras_locations2], 'bo', label='ground truth',
+             markersize=7)
     plt.plot([x[0] for x in cameras_locations], [x[2] for x in cameras_locations], 'ro', markersize=5)
     plt.title('Camera locations in 2D')
+    plt.figure()
+    plt.plot([i for i in range(len(distance))], [distance[i] for i in range(len(distance))], 'bo', label='ground truth',
+             markersize=1)
+    plt.title('Camera distance from ground truth')
 
 
 def present_error(camera_symbol, initial, result, location_symbol, worst_factor, title1='', title2=''):
@@ -891,22 +917,7 @@ def print_graph_errors(graph, initial, key_frames, result):
 #     ax.grid(True)
 #
 #
-# def extract_keyframes(db: TrackingDB):
-#     keyFrames = []  # all keyframes start with zero
-#     frames = db.all_frames()
-#     lastKeyFrameId = 0
-#     while lastKeyFrameId < len(frames):
-#         tracksizeKeyframe = np.array(
-#             [np.sum(np.array(db.frames(track)) > lastKeyFrameId) for track in db.tracks(lastKeyFrameId)])
-#         sizeKeyframe = int(np.median(tracksizeKeyframe))  # we want to find the size that at least half of the
-#         # keypoint are bigger than it
-#         sizeKeyframe = min(sizeKeyframe, MAX_SIZE_KEYFRAME)
-#         if len(frames) - 1 - lastKeyFrameId < 5:
-#             keyFrames.append((lastKeyFrameId,len(frames) - 1))
-#         else:
-#             keyFrames.append((int(lastKeyFrameId), int(lastKeyFrameId+ sizeKeyframe)))
-#         lastKeyFrameId += int(sizeKeyframe)
-#     return keyFrames
+
 
 def transform_to_gtsam_pose(frame_idx, transformations, frames):
     reference_transform = transformations[frames[0]]
@@ -1073,28 +1084,64 @@ def find_bad_tracks(first_frame_idx, last_frame_idx, db, k_matrix,
         #     print(fac.error(est))
 
 
+def calc_locations_angle(t1, t2):
+    cam1_rotation = t1[:3, :3]
+    cam1_translation = t1[:3, 3]
+    cam1_position = -cam1_rotation.T @ cam1_translation
+    cam1_position = cam1_position[:2]
+
+    cam2_rotation = t2[:3, :3]
+    cam2_translation = t2[:3, 3]
+    cam2_position = -cam2_rotation.T @ cam2_translation
+    cam2_position = cam2_position[:2]
+    x = max(np.abs(cam2_position[1] - cam1_position[1]), np.abs(cam2_position[0] - cam1_position[0]))
+    y = min(np.abs(cam2_position[1] - cam1_position[1]), np.abs(cam2_position[0] - cam1_position[0]))
+    angle = np.arctan2(y, x)
+    # angle = np.arctan2(np.abs(cam2_position[1] - cam1_position[1]), np.abs(cam2_position[0] - cam1_position[0]))
+
+    return angle
+
+
 def extract_keyframes(db: TrackingDB, transformations):
     keyFrames = []  # all keyframes start with zero
     frames = db.all_frames()
+    num_frames = len(frames)
     i = 0
-    while i < len(frames) - 1:
-        t1 = transformations[i]
-        tracks = set(db.tracks(i))
-        initial_len = len(tracks)
+    minimum_gap = 5
+    max_dist = 5.0
+    track_losing_factor = 0.3
+    max_gap = 25
 
-        j = i + 1
-        while j < i + 21 and j < len(frames) - 1:
+    theta_max = 20
+
+    while i < num_frames - 1:
+        t_initial = transformations[i]
+        t1 = t_initial
+        old_tracks = set(db.tracks(i))
+        start = min(i + minimum_gap, num_frames - 1)
+        dist = 0
+        # accumalate_angle = 0
+        for j in range(start, min(i + max_gap, num_frames)):
             t2 = transformations[j]
-            dist = calculate_distance_between_keyframes(t1, t2)
+            dist = calculate_distance_between_keyframes(t_initial, t2)
             new_tracks = set(db.tracks(j))
-            tracks = tracks.intersection(new_tracks)
-            if len(tracks) < initial_len // 4 or j == i + 20 or j == len(frames) - 1 or dist > 2.0:
-                keyFrames.append((i, j))
-                break
-            j += 1
-        # print(f"j-i : {j - i}, i,j : {i}, {j}")
+            common_tracks = old_tracks.intersection(new_tracks)
+            tracks_ratio = len(common_tracks) / len(old_tracks)
+            old_tracks = new_tracks
+            accumalate_angle = (np.abs(calc_locations_angle(t_initial, t2))*180/np.pi)
+            t1 = t2
+            print(f"angle {accumalate_angle} dist {dist} common tracks {len(common_tracks)}, frame {j}, i {i}")
 
-        i = j
+            if tracks_ratio < track_losing_factor or j == i + max_gap - 1 \
+                    or j == num_frames - 1 or dist > max_dist or accumalate_angle > theta_max:
+                keyFrames.append((i, j))
+                i = j+1
+                break
+
+
+        # Update i to j+1 if no keyframe was added in the inner loop
+        if j == min(i + max_gap -1, num_frames-1):
+            i = j + 1
 
     return keyFrames
 
@@ -1149,53 +1196,40 @@ def visualize_track(tracking_db: TrackingDB, trackId: int):
         if i == 0:
             plt.title(f"Frame {frameId}, Track {trackId}")
 
+from ex4_v2 import main
 
-if __name__ == '__main__':
-    all_frames_serialized_db_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/DB3000"
-    # serialized_db_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/DB_all_after_changing the percent"
-    serialized_db_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/NEWEST_AKAZE_200"
-    # db = create_DB(path, LEN_DATA_SET)
-    # db.serialize(serialized_db_path)
+
+
+def this_main(arg):
+    ORB_PATH = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/ORB/db/db_3359"
+    AKAZE_PATH = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/AKAZE/db/db_3359"
+    SIFT_PATH = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/SIFT/db/db_3359"
+    path = r"C:\Users\elyas\University\SLAM video navigation\VAN_ex\code\VAN_ex\dataset\sequences\00"
+    if arg == 'orb':
+        serialized_path = ORB_PATH
+    elif arg == 'akaze':
+        serialized_path = AKAZE_PATH
+    elif arg == 'sift':
+        serialized_path = SIFT_PATH
+    else:
+        serialized_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/pic"
+
+    # main(arg)
     db = TrackingDB()
-    db.load(serialized_db_path)
-    # transformations = np.array(read_extrinsic_matrices())
-    # find_bad_tracks(0,10,db,k_object,transformations)
-    # tracks = db.tracks(105)
-    # t =tracks[40]
-    # visualize_track(db, t)
-    # frames = db.frames(1392)
-    # link1 = db.link(frames[0], 1392)
-    # link2 = db.link(frames[-1], 1392)
-    # print(f"Link1 {link1.x_left, link1.y, link1.x_right}, Link2 {link2.x_left, link2.y, link2.x_right}")
-    # plt.show()
-    # for i in db.frames(393):
-    #     link = db.link(i,393)
-    #     pose = gtsam.Pose3()
-    #     first_frame_cam = gtsam.StereoCamera(pose, k_object)
-    #     p = gtsam.StereoPoint2(link.x_left, link.y, link.x_right)
-    #     world_point_tr = linear_least_squares_triangulation(P,Q,(link.x_left, link.y), (link.x_right, link.y))
-    #     world_point = first_frame_cam.backproject(p)
-    #     print(f" frame {i} : {world_point}, triangulated {world_point_tr}")
-
-    # q_5_1(db)
-    # for track in db.all_tracks():
-    #     frames = sorted(db.frames(track))
-    #     optimize_track(db,track,transformations,frames[0],frames[-1])
-    # q_5_3(db)
-    #
-    # i = 0
-    # for j in range(12):
-    #     for t in db.tracks(j):
-    #         i += len(db.frames(t))
-    #     print(i / len(db.tracks(j)), len(db.tracks(j)))
-    #     i = 0
-
-    # frames = sorted(db.frames(26988))
-    # t0 = transformations[frames[0]]
-    # ti = transformations[frames[-1]]
-    # print(calculate_distance_between_keyframes(t0,ti))
-
-    # q_5_1(db)
+    db.load(serialized_path)
     q_5_4(db)
 
     plt.show()
+
+if __name__ == '__main__':
+    import sys
+    import multiprocessing
+    args = ['akaze']
+
+    # Create a multiprocessing pool
+    for arg in args:
+        this_main(arg)
+    # with multiprocessing.Pool(processes=len(args)) as pool:
+    #     pool.map(this_main, args)
+    # plt.show()
+

@@ -90,38 +90,54 @@ def q_6_2(keyframe_indices, kf_graphs, optimised_results,bundles):
 
     # Iterate through all bundles
     for i in range(len(kf_graphs)):
-        marginals = gtsam.Marginals(kf_graphs[i], optimised_results[i])
+        try:
+            print(f"Creating marginals{i}")
+            marginals = gtsam.Marginals(kf_graphs[i], optimised_results[i])
+        except:
+            print(f"Marginals not created, {i}")
+            continue
 
-        for i in range(len(keyframe_indices) - 1):
-            bund = bundles[i]
-            cameras_dict = bund['cameras_dict']
-            keyframe = bund['keyframes']
-            result = bund['result']
-
-            start_frame_symbol = cameras_dict[keyframe[0]]
-            end_frame_symbol = cameras_dict[keyframe[1]]
-
-
-            # Use the provided function to calculate relative pose and covariance
-            marginals, relative_pose, relative_cov = calculate_relative_pose_cov(start_frame_symbol, end_frame_symbol,
-                                                                                 kf_graphs[i],
-                                                                                 optimised_results[i])
-            # first_frame_pose = result.atPose3(first_frame_symbol)
-            # last_frame_pose = result.atPose3(last_frame_symbol)
-            # relative_pose = first_frame_pose.between(last_frame_pose)
-            # relative_cov =
+        bund = bundles[i]
+        cameras_dict = bund['cameras_dict']
+        keyframe = bund['keyframes']
+        # result = bund['result']
+        keyframe = keyframe_indices[i]
+        # for i in range(keyframe_indices[i]):
+        start_frame_symbol = cameras_dict[keyframe[0]]
+        end_frame_symbol = cameras_dict[keyframe[1]]
 
 
-            # Add the relative pose factor to the pose graph
-            noise_model = gtsam.noiseModel.Gaussian.Covariance(relative_cov)
-            factor = gtsam.BetweenFactorPose3(start_frame_symbol, end_frame_symbol, relative_pose, noise_model)
-            pose_graph.add(factor)
+        # Use the provided function to calculate relative pose and covariance
+        # marginals, relative_pose, relative_cov = calculate_relative_pose_cov(start_frame_symbol, end_frame_symbol,
+        #                                                                      kf_graphs[i],
+        #                                                                      optimised_results[i])
+        first_frame_pose = optimised_results[i].atPose3(start_frame_symbol)
+        last_frame_pose = optimised_results[i].atPose3(end_frame_symbol)
+        relative_pose = first_frame_pose.between(last_frame_pose)
 
-            # Add initial poses to the initial estimate if not already added
-            if not initial_estimate.exists(start_frame_symbol):
-                initial_estimate.insert(start_frame_symbol, optimised_results[i].atPose3(start_frame_symbol))
-            if not initial_estimate.exists(end_frame_symbol):
-                initial_estimate.insert(end_frame_symbol, optimised_results[i].atPose3(end_frame_symbol))
+        keys = gtsam.KeyVector()
+        keys.append(start_frame_symbol)
+        keys.append(end_frame_symbol)
+        # marginals.marginalCovariance(cameras_dict[cam])
+        marginal_cov = marginals.jointMarginalCovariance(keys).fullMatrix()
+
+        information = np.linalg.inv(marginal_cov)
+
+        # Extract the relative covariance
+        relative_cov = np.linalg.inv(information[-6:, -6:])
+
+
+        # Add the relative pose factor to the pose graph
+        noise_model = gtsam.noiseModel.Gaussian.Covariance(relative_cov)
+        # noise_model = gtsam.noiseModel.Diagonal.Sigmas(np.array([0.1, 0.1, 0.1, 0.1, 0.1, 0.1]))
+        factor = gtsam.BetweenFactorPose3(start_frame_symbol, end_frame_symbol, relative_pose, noise_model)
+        pose_graph.add(factor)
+
+        # Add initial poses to the initial estimate if not already added
+        if not initial_estimate.exists(start_frame_symbol):
+            initial_estimate.insert(start_frame_symbol, optimised_results[i].atPose3(start_frame_symbol))
+        if not initial_estimate.exists(end_frame_symbol):
+            initial_estimate.insert(end_frame_symbol, optimised_results[i].atPose3(end_frame_symbol))
 
     # Optimize the factor graph
     optimizer = gtsam.LevenbergMarquardtOptimizer(pose_graph, initial_estimate)
@@ -146,24 +162,29 @@ def q_6_2(keyframe_indices, kf_graphs, optimised_results,bundles):
 
 if __name__ == '__main__':
     db = TrackingDB()
-    serialized_path = arguments.DATA_HEAD + "/docs/NEWEST_AKAZE_500"
+    serialized_path = arguments.DATA_HEAD + "/docs/NEWEST_AKAZE"
     db.load(serialized_path)
     t = ex3.read_extrinsic_matrices()
     keyframe_indices = ex5.extract_keyframes(db, t)
     bundles, graphs, results = get_graph_and_result(db,keyframe_indices)
     print(len(bundles))
-    first_bundle_graph = graphs[0]
-    first_result = results[0]# change depending on the change in the ex5 - we want to only have the first bundle
+    first_bundle_graph = graphs[1]
+    first_result = results[1]# change depending on the change in the ex5 - we want to only have the first bundle
 
     # t = ex5.calculate_transformations(db, 0,arguments.LEN_DATA)
     #todo this is the true transformation the previous one is the one we use
 
     last_frame_symbol = get_frame_symbol(keyframe_indices[1])
     first_frame_symbol = get_frame_symbol(0)
-    bundel_0 = bundles[0]
+    bundel_0 = bundles[1]
     cameras = bundel_0['cameras_dict']
-    first_cam_symbol = cameras[0]
-    last_cam_symbol = cameras[keyframe_indices[0][1]]
+    first_cam_symbol = cameras[4]
+    last_cam_symbol = cameras[keyframe_indices[1][1]]
     q_6_1(first_bundle_graph,first_result,first_cam_symbol, last_cam_symbol)
 
     q_6_2(keyframe_indices,graphs,results, bundles)
+
+
+
+
+

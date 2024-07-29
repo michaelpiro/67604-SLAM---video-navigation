@@ -6,16 +6,17 @@ import cv2
 import pickle
 from typing import List, Tuple, Dict, Sequence, Optional
 from timeit import default_timer as timer
-from tracking_database import TrackingDB, Link, MatchLocation
+from utils.tracking_database import TrackingDB, Link, MatchLocation
 from tqdm import tqdm
 # from ex4_2_to_6 import q_4_2, q_4_3, q_4_4, q_4_5, q_4_6, q_4_7, find_longest_track_frames
 
 from ex3 import P, Q, K, M1, M2, read_extrinsic_matrices, rodriguez_to_mat
-from ex5 import get_inverse, translate_later_t_to_older_t
+# from ex5 import get_inverse, translate_later_t_to_older_t
 import ex2
 import random
 
 NO_ID = -1
+
 
 # FEATURE = cv2.SIFT_create(enable_precise_upscale = True)
 # print(FEATURE.getNFeatures())
@@ -25,91 +26,88 @@ NO_ID = -1
 # FEATURE.setNFeatures(600)
 
 
-FEATURE = cv2.AKAZE_create()
-
-FEATURE.setNOctaves(2)
-FEATURE.setThreshold(0.008)
-FEATURE.setDescriptorSize(256)
-# FEATURE.setThreshold(0.008)
-
-print(FEATURE.getThreshold())
-
-# FLANN parameters
-FLANN_INDEX_KDTREE = 1
-index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
-search_params = dict(checks=50)  # or pass empty dictionary
-
-
-# FEATURE = cv2.SIFT_create(
-#     nfeatures=1000,        # Number of best features to retain
-#     contrastThreshold=0.1,  # Contrast threshold for filtering weak features
-#     edgeThreshold=10,     # Threshold for edge filtering
-#     sigma=1.6             # Gaussian filter sigma
-# )
+# # FLANN parameters
+# FLANN_INDEX_KDTREE = 1
+# index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
+# search_params = dict(checks=50)  # or pass empty dictionary
+#
+# # FEATURE = cv2.SIFT_create(
+# #     nfeatures=1000,        # Number of best features to retain
+# #     contrastThreshold=0.04,  # Contrast threshold for filtering weak features
+# #     edgeThreshold=10,     # Threshold for edge filtering
+# #     sigma=1.6  ,           # Gaussian filter sigma
+# #     enable_precise_upscale = True
+# # )
+#
+#
+# # Create BFMatcher with L2 norm (suitable for KAZE)
+# bf_matcher = cv2.BFMatcher(normType=cv2.NORM_L2, crossCheck=False)
+# bf_matcher = cv2.BFMatcher(normType=cv2.NORM_HAMMING2, crossCheck=False)
+# MATCHER_LEFT_RIGHT = cv2.BFMatcher(normType=cv2.NORM_HAMMING2, crossCheck=True)
 
 
-# Create BFMatcher with L2 norm (suitable for KAZE)
-bf_matcher = cv2.BFMatcher(normType=cv2.NORM_L2, crossCheck=False)
-
-
-flann = cv2.FlannBasedMatcher(index_params, search_params)
-MATCHER = bf_matcher
+# FLANN_INDEX_LSH = 6
+# index_params= dict(algorithm = FLANN_INDEX_LSH,
+#                    table_number = 6, # 12
+#                    key_size = 12,     # 20
+#                    multi_probe_level = 1) #2
+# flann = cv2.FlannBasedMatcher(index_params, search_params)
+# MATCHER = bf_matcher
+# MATCHER_LEFT_RIGHT = flann
 # MATCHER = bf_matcher
 
 # MATCHER2 = cv2.BFMatcher(normType=cv2.NORM_HAMMING, crossCheck=False)
 # DATA_PATH = r'C:\Users\elyas\University\SLAM video navigation\VAN_ex\code\VAN_ex\dataset\sequences\00\\'
+
+def get_akaze_matcher_lr_matcher():
+    global FEATURE, MATCHER_LEFT_RIGHT, MATCHER
+    FEATURE = cv2.AKAZE_create(threshold=0.0008, nOctaves=4, nOctaveLayers=4)
+    # FEATURE.setNOctaves(4)
+    # FEATURE.setThreshold(0.001)
+    # FEATURE.setDescriptorChannels(3)
+    # FEATURE.setDescriptorType(3)
+    # print(cv2.AKAZE_DESCRIPTOR_KAZE)
+    # # FEATURE.setDiffusivity(1)
+    # print(cv2.KAZE_DIFF_PM_G2)
+    # print(cv2.KAZE_DIFF_PM_G1)
+    # print(cv2.KAZE_DIFF_WEICKERT)
+    # print(cv2.KAZE_DIFF_CHARBONNIER)
+    # cv2.DIFF_PM_G1, DIFF_PM_G2, DIFF_WEICKERT or DIFF_CHARBONNIER
+    # FEATURE.setMaxPoints(1000)
+    # print(FEATURE.getThreshold())
+    # Create BFMatcher with L2 norm (suitable for KAZE)
+    bf_matcher = cv2.BFMatcher(normType=cv2.NORM_HAMMING, crossCheck=False)
+    MATCHER_LEFT_RIGHT = cv2.BFMatcher(normType=cv2.NORM_HAMMING, crossCheck=True)
+    MATCHER = bf_matcher
+
+
+def get_ORB_matcher_lr_matcher():
+    global FEATURE, MATCHER_LEFT_RIGHT, MATCHER
+    FEATURE = cv2.ORB_create(nfeatures=1500, scaleFactor=1.1, nlevels=8, edgeThreshold=31, firstLevel=0, WTA_K=2,
+                             scoreType=cv2.ORB_HARRIS_SCORE, patchSize=31, fastThreshold=20)
+    bf_matcher = cv2.BFMatcher(normType=cv2.NORM_HAMMING, crossCheck=False)
+    MATCHER_LEFT_RIGHT = cv2.BFMatcher(normType=cv2.NORM_HAMMING, crossCheck=True)
+    MATCHER = bf_matcher
+
+
+def get_sift_matcher_lr_matcher():
+    global FEATURE, MATCHER, MATCHER_LEFT_RIGHT
+    FEATURE = cv2.SIFT_create(nfeatures=2500, contrastThreshold=0.04, edgeThreshold=10, sigma=1.6,
+                              enable_precise_upscale=True)
+    MATCHER = cv2.BFMatcher(normType=cv2.NORM_L2, crossCheck=False)
+    MATCHER_LEFT_RIGHT = cv2.BFMatcher(normType=cv2.NORM_L2, crossCheck=True)
+
+
 DATA_PATH = '/Users/mac/67604-SLAM-video-navigation/VAN_ex/dataset/sequences/00/'
 LEN_DATA_SET = len(os.listdir(DATA_PATH + 'image_0'))
-
-
-# LEN_DATA_SET = 1000
-# P = ex3.P
-# Q = ex3.Q
-# K = ex3.K
-# M1 = ex3.M1
-# M2 = ex3.M2
-
-
-class Match:
-    def __init__(self, queryIdx, trainIdx, kp1, kp2):
-        self.queryIdx = queryIdx
-        self.trainIdx = trainIdx
-        self.kp1 = kp1
-        self.kp2 = kp2
-
-    def get_query_kp(self):
-        return self.kp1
-
-    def get_train_kp(self):
-        return self.kp2
-
-    def get_query_idx(self):
-        return self.queryIdx
-
-    def get_train_idx(self):
-        return self.trainIdx
-
-    @property
-    def x1(self):
-        return self.kp1.pt[0]
-
-    @property
-    def y1(self):
-        return self.kp1.pt[1]
-
-    @property
-    def x2(self):
-        return self.kp2.pt[0]
-
-    @property
-    def y2(self):
-        return self.kp2.pt[1]
 
 
 def extract_kps_descs_matches(img_0, img1):
     kp0, desc0 = FEATURE.detectAndCompute(img_0, None)
     kp1, desc1 = FEATURE.detectAndCompute(img1, None)
-    matches = MATCHER.match(desc0, desc1)
+    # matches = MATCHER.match(desc0, desc1)
+    matches = MATCHER_LEFT_RIGHT.match(desc0, desc1)
+    # print(f"num matches {len(matches)}")
     # kp0_new = []
     # kp1_new = []
     # desc0_new = []
@@ -127,8 +125,8 @@ def extract_kps_descs_matches(img_0, img1):
 
 
 def extract_inliers_outliers(kp_left, kp_right, matches):
-    kp_left_pts = np.array([kp.pt for kp in kp_left])
-    kp_right_pts = np.array([kp.pt for kp in kp_right])
+    # kp_left_pts = np.array([kp.pt for kp in kp_left])
+    # kp_right_pts = np.array([kp.pt for kp in kp_right])
 
     inliers = []
     outliers = []
@@ -137,13 +135,13 @@ def extract_inliers_outliers(kp_left, kp_right, matches):
         ind_left = matches[match_index].queryIdx
         ind_right = matches[match_index].trainIdx
         point_left = kp_left[ind_left].pt
-        x_left = point_left[0]
-        y_left = point_left[1]
+        # x_left = point_left[0]
+        # y_left = point_left[1]
         point_right = kp_right[ind_right].pt
 
         # Use numpy arrays for comparisons
         good_map1 = abs(point_left[1] - point_right[1]) < 2
-        good_map2 = point_left[0] > point_right[0]
+        good_map2 = point_left[0] > point_right[0] + 2
         # good_map2 = True
         if good_map1 and good_map2:
             inliers.append(match_index)
@@ -245,53 +243,66 @@ def transformation_agreement(T, traingulated_pts, prev_left_pix_values, prev_rig
                              ordered_cur_left_pix_values, ordered_cur_right_pix_values, x_condition=True):
     T_4x4 = np.vstack((T, np.array([0, 0, 0, 1])))
     points_4d = np.hstack((traingulated_pts, np.ones((traingulated_pts.shape[0], 1)))).T
-    l1_4d_points = (T_4x4 @ points_4d)
-    to_the_right = (K @ M2)
+    l1_4d_projected = ((K @ T @ np.vstack((M1, np.array([0, 0, 0, 1])))) @ points_4d)[:3, :].T
+    r1_4d_projected = ((K @ T @ np.vstack((M2, np.array([0, 0, 0, 1])))) @ points_4d)[:3, :].T
 
-    transform_to_l0_points = (P @ points_4d).T
-    transform_to_l0_points = transform_to_l0_points / transform_to_l0_points[:, 2][:, np.newaxis]
-    real_y = prev_left_pix_values[:, 1]
-    agree_l0 = np.abs(transform_to_l0_points[:, 1] - real_y) < 2
-    agree_x = np.abs(transform_to_l0_points[:, 0] - prev_left_pix_values[:, 0]) < 2
-    agree_l0 = np.logical_and(agree_l0, agree_x)
-
-    transform_to_r0_points = (to_the_right @ points_4d).T
-    transform_to_r0_points = transform_to_r0_points / transform_to_r0_points[:, 2][:, np.newaxis]
-    real_y = prev_right_pix_values[:, 1]
-    agree_r0 = np.abs(transform_to_r0_points[:, 1] - real_y) < 2
-    agree_x = np.abs(transform_to_r0_points[:, 0] - prev_right_pix_values[:, 0]) < 2
-    agree_r0 = np.logical_and(agree_r0, agree_x)
-    if x_condition:
-        real_x_l = prev_left_pix_values[:, 0]
-        real_x_r = prev_right_pix_values[:, 0]
-        cond_x = real_x_l > real_x_r + 2
-    else:
-        cond_x = np.ones_like(agree_r0)
-    agree_0 = np.logical_and(agree_r0, cond_x, agree_l0)
-    # agree_0 = np.array([True] * len(triangulate_points()))
-
-
-    transformed_to_l1_points = (K @ l1_4d_points[:3, :]).T
-    transformed_to_l1_points = transformed_to_l1_points / transformed_to_l1_points[:, 2][:, np.newaxis]
+    transformed_to_l1_points = l1_4d_projected / l1_4d_projected[:, 2][:, np.newaxis]
     real_y = ordered_cur_left_pix_values[:, 1]
     agree_l1 = np.abs(transformed_to_l1_points[:, 1] - real_y) < 2
     agree_x = np.abs(transformed_to_l1_points[:, 0] - ordered_cur_left_pix_values[:, 0]) < 2
     agree_l1 = np.logical_and(agree_l1, agree_x)
 
-    transformed_to_r1_points = (to_the_right @ l1_4d_points).T
-    transformed_to_r1_points = transformed_to_r1_points / transformed_to_r1_points[:, 2][:, np.newaxis]
+    transformed_to_r1_points = r1_4d_projected / r1_4d_projected[:, 2][:, np.newaxis]
     real_y = ordered_cur_right_pix_values[:, 1]
     agree_r1 = np.abs(transformed_to_r1_points[:, 1] - real_y) < 2
     agree_x = np.abs(transformed_to_r1_points[:, 0] - ordered_cur_right_pix_values[:, 0]) < 2
     agree_r1 = np.logical_and(agree_r1, agree_x)
-    if x_condition:
-        real_x_l = ordered_cur_left_pix_values[:, 0]
-        real_x_r = ordered_cur_right_pix_values[:, 0]
-        cond_x = real_x_l > real_x_r + 2
-    else:
-        cond_x = np.ones_like(agree_r1)
-    agree_1 = np.logical_and(agree_r1, cond_x, agree_l1)
-    return np.logical_and(agree_0, agree_1)
+
+    return np.logical_and(agree_l1, agree_r1)
+
+    # transform_to_l0_points = (P @ points_4d).T
+    # transform_to_l0_points = transform_to_l0_points / transform_to_l0_points[:, 2][:, np.newaxis]
+    # real_y = prev_left_pix_values[:, 1]
+    # agree_l0 = np.abs(transform_to_l0_points[:, 1] - real_y) < 2
+    # agree_x = np.abs(transform_to_l0_points[:, 0] - prev_left_pix_values[:, 0]) < 2
+    # agree_l0 = np.logical_and(agree_l0, agree_x)
+    #
+    # transform_to_r0_points = (to_the_right @ points_4d).T
+    # transform_to_r0_points = transform_to_r0_points / transform_to_r0_points[:, 2][:, np.newaxis]
+    # real_y = prev_right_pix_values[:, 1]
+    # agree_r0 = np.abs(transform_to_r0_points[:, 1] - real_y) < 2
+    # agree_x = np.abs(transform_to_r0_points[:, 0] - prev_right_pix_values[:, 0]) < 2
+    # agree_r0 = np.logical_and(agree_r0, agree_x)
+    # if x_condition:
+    #     real_x_l = prev_left_pix_values[:, 0]
+    #     real_x_r = prev_right_pix_values[:, 0]
+    #     cond_x = real_x_l > real_x_r + 2
+    # else:
+    #     cond_x = np.ones_like(agree_r0)
+    # agree_0 = np.logical_and(agree_r0, cond_x, agree_l0)
+    # agree_0 = np.array([True] * len(triangulate_points()))
+
+    # transformed_to_l1_points = (K @ l1_4d_points[:3, :]).T
+    # transformed_to_l1_points = transformed_to_l1_points / transformed_to_l1_points[:, 2][:, np.newaxis]
+    # real_y = ordered_cur_left_pix_values[:, 1]
+    # agree_l1 = np.abs(transformed_to_l1_points[:, 1] - real_y) < 2
+    # agree_x = np.abs(transformed_to_l1_points[:, 0] - ordered_cur_left_pix_values[:, 0]) < 2
+    # agree_l1 = np.logical_and(agree_l1, agree_x)
+    #
+    # transformed_to_r1_points = (to_the_right @ l1_4d_points).T
+    # transformed_to_r1_points = transformed_to_r1_points / transformed_to_r1_points[:, 2][:, np.newaxis]
+    # real_y = ordered_cur_right_pix_values[:, 1]
+    # agree_r1 = np.abs(transformed_to_r1_points[:, 1] - real_y) < 2
+    # agree_x = np.abs(transformed_to_r1_points[:, 0] - ordered_cur_right_pix_values[:, 0]) < 2
+    # agree_r1 = np.logical_and(agree_r1, agree_x)
+    # if x_condition:
+    #     real_x_l = ordered_cur_left_pix_values[:, 0]
+    #     real_x_r = ordered_cur_right_pix_values[:, 0]
+    #     cond_x = real_x_l > real_x_r + 2
+    # else:
+    #     cond_x = np.ones_like(agree_r1)
+    # agree_1 = np.logical_and(agree_r1, cond_x, agree_l1)
+    # return np.logical_and(agree_0, agree_1)
 
 
 #
@@ -360,6 +371,9 @@ def get_pixels_from_links(links):
         pixels_first.append((link.x_left, link.y))
         pixels_second.append((link.x_right, link.y))
     return pixels_first, pixels_second
+
+
+TRANSFORMATIONS = []
 
 
 def ransac_pnp_for_tracking_db(matches_l_l, prev_links, cur_links, inliers_percent):
@@ -446,7 +460,6 @@ def ransac_pnp_for_tracking_db(matches_l_l, prev_links, cur_links, inliers_perce
 
     points_3d = triangulate_links(filtered_links_prev, P, Q)
 
-
     prev_left_pix_values, prev_right_pix_values = get_pixels_from_links(filtered_links_prev)
     ordered_cur_left_pix_values, ordered_cur_right_pix_values = get_pixels_from_links(filtered_links_cur)
 
@@ -487,21 +500,23 @@ def ransac_pnp_for_tracking_db(matches_l_l, prev_links, cur_links, inliers_perce
         #                                          x_condition=True)
 
         points_agreed = transformation_agreement(T, points_3d, prev_left_pix_values, prev_right_pix_values,
-                                                 ordered_cur_left_pix_values, ordered_cur_right_pix_values, x_condition=True)
+                                                 ordered_cur_left_pix_values, ordered_cur_right_pix_values,
+                                                 x_condition=False)
 
         num_inliers = np.sum(points_agreed)
         if num_inliers > best_inliers:
             best_inliers = num_inliers
-            # best_T = T
+            best_T = T
             best_matches_idx = np.where(points_agreed == True)[0]
     # print(best_inliers,len(concensus_idx))
-
+    global TRANSFORMATIONS
+    TRANSFORMATIONS.append(best_T)
     return best_matches_idx
 
 
 def calc_ransac_iteration(inliers_percent):
     sec_prob = 0.9999999999
-    outliers_prob = 1 - (inliers_percent / 100)
+    outliers_prob = 1 - (inliers_percent / 100) + 0.0000000001
     min_set_size = 4
     ransac_iterations = int(np.log(1 - sec_prob) / np.log(1 - np.power(1 - outliers_prob, min_set_size))) + 1
     return ransac_iterations
@@ -665,38 +680,47 @@ def calc_ransac_iteration(inliers_percent):
 #     return best_matches_idx
 
 
-def create_db(path_to_sequence=r"VAN_ex/code/VAN_ex/dataset/sequences/00", num_frames=200):
-    db = TrackingDB()
-    l_prev_img, r_prev_img = ex2.read_images(0)
-    kp_l_prev, kp_r_prev, desc_l_prev, desc_r_prev, matches_prev = extract_kps_descs_matches(l_prev_img, r_prev_img)
-
-    in_prev = np.array([False] * len(matches_prev))
-    in_prev_idx = extract_inliers_outliers(kp_l_prev, kp_r_prev, matches_prev)[0]
-    in_prev[in_prev_idx] = True
-
-    feature_prev, links_prev = db.create_links(desc_l_prev, kp_l_prev, kp_r_prev, matches_prev, in_prev)
-    db.add_frame(links=links_prev, left_features=feature_prev, matches_to_previous_left=None, inliers=None)
-    db.frameID_to_inliers_percent[0] = 100 * (len(in_prev_idx) / len(matches_prev))
+def create_db(path_to_sequence=r"VAN_ex/code/VAN_ex/dataset/sequences/00", start_frame=0, num_frames=200,
+              save_every=500, save_name="tracking_db", db=None):
+    if db is None:
+        db = TrackingDB()
+    if start_frame == 0:
+        start_loop = 1
+        feature_prev, links_prev = first_operation(db, 0)
+        db.add_frame(links=links_prev, left_features=feature_prev, matches_to_previous_left=None, inliers=None)
+    else:
+        start_loop = start_frame
+        # links_prev, feature_prev = db.links(start_frame - 1), db.features(start_frame - 1)
     # print(f"Frame 0: {DB.frameID_to_inliers_percent[0]}% inliers")
-
-    for i in tqdm(range(1, num_frames)):
-        l_cur_img, r_cur_img = ex2.read_images(i)
-        # kp_l_cur, kp_r_cur, desc_l_cur, desc_r_cur, matches_cur = extract_kps_descs_matches(l_prev_img, r_prev_img)
-        kp_l_cur, kp_r_cur, desc_l_cur, desc_r_cur, matches_cur = extract_kps_descs_matches(l_cur_img, r_cur_img)
-
-        # extract the inliers and outliers and triangulate the points
-        in_cur_idx = extract_inliers_outliers(kp_l_cur, kp_r_cur, matches_cur)[0]
-
-        db.frameID_to_inliers_percent[i] = 100 * (len(in_cur_idx) / len(matches_cur))
-        if db.frameID_to_inliers_percent[i] < 35:
-            print(i)
-
-        # print(f"Frame {i}: {DB.frameID_to_inliers_percent[i]}% inliers, num of matches: {len(matches_cur)}")
-        in_cur = np.array([False] * len(matches_cur))
-        in_cur[in_cur_idx] = True
-
-        # create the links for the curr frame:
-        feature_cur, links_cur = db.create_links(desc_l_cur, kp_l_cur, kp_r_cur, matches_cur, in_cur)
+    last_frame_serialized = -1
+    for i in tqdm(range(start_loop, num_frames)):
+        if i % save_every == 0 and (i != start_frame):
+            db_path = os.path.join(save_name, 'db', 'db_{}'.format(i))
+            db.serialize(db_path)
+            for j in range(save_every):
+                frame_number = i - save_every + j
+                frame_path = os.path.join(save_name, 'frames', 'frames')
+                db.serialize_frame(frame_path, frame_number)
+            last_frame_serialized = i - 1
+        # l_cur_img, r_cur_img = ex2.read_images(i)
+        # # kp_l_cur, kp_r_cur, desc_l_cur, desc_r_cur, matches_cur = extract_kps_descs_matches(l_prev_img, r_prev_img)
+        # kp_l_cur, kp_r_cur, desc_l_cur, desc_r_cur, matches_cur = extract_kps_descs_matches(l_cur_img, r_cur_img)
+        # print(f"num matches: {len(matches_cur)}")
+        #
+        # # extract the inliers and outliers and triangulate the points
+        # in_cur_idx = extract_inliers_outliers(kp_l_cur, kp_r_cur, matches_cur)[0]
+        #
+        # db.frameID_to_inliers_percent[i] = 100 * (len(in_cur_idx) / len(matches_cur))
+        # if db.frameID_to_inliers_percent[i] < 35:
+        #     print(i)
+        #
+        # # print(f"Frame {i}: {DB.frameID_to_inliers_percent[i]}% inliers, num of matches: {len(matches_cur)}")
+        # in_cur = np.array([False] * len(matches_cur))
+        # in_cur[in_cur_idx] = True
+        #
+        # # create the links for the curr frame:
+        # feature_cur, links_cur = db.create_links(desc_l_cur, kp_l_cur, kp_r_cur, matches_cur, in_cur)
+        feature_cur, links_cur = first_operation(db, i)
 
         prev_features = db.features(i - 1)
 
@@ -728,14 +752,11 @@ def create_db(path_to_sequence=r"VAN_ex/code/VAN_ex/dataset/sequences/00", num_f
         good_idx = np.array(good_idx)
         filtered_matches_l_l = matches_l_l[good_idx]
 
-
-
         # img_points = np.array([kp_l_cur[match.trainIdx].pt for match in matches_l_l])
         # points_3d = triangulate_links(links_prev, P, Q)
         # camera_matrix = np.array([[K[0, 0], 0, K[0, 2]], [0, K[1, 1], K[1, 2]], [0, 0, 1]])
         # dist_
         # rvec,tvec,suc, inliers = cv2.solvePnPRansac(points_3d,img_points,camera_matrix,distCoeffs=None)
-
 
         prev_links = db.all_frame_links(i - 1)
         best_matches_idx = ransac_pnp_for_tracking_db(filtered_matches_l_l, prev_links, links_cur,
@@ -747,7 +768,33 @@ def create_db(path_to_sequence=r"VAN_ex/code/VAN_ex/dataset/sequences/00", num_f
 
         db.add_frame(links_cur, feature_cur, matches_l_l, in_prev_cur)
 
+    if last_frame_serialized != num_frames - 1:
+        db_path = os.path.join(save_name, 'db', 'db_{}'.format(num_frames - 1))
+        db.serialize(db_path)
+        frame_dir_path = os.path.join(save_name, 'frames', 'frames')
+        for k in range(last_frame_serialized + 1, num_frames):
+            db.serialize_frame(frame_dir_path, k)
+
     return db
+
+
+def first_operation(db, frame_idx):
+    l_prev_img, r_prev_img = ex2.read_images(frame_idx)
+    kp_l_prev, kp_r_prev, desc_l_prev, desc_r_prev, matches_prev = extract_kps_descs_matches(l_prev_img, r_prev_img)
+
+    in_prev_idx = extract_inliers_outliers(kp_l_prev, kp_r_prev, matches_prev)[0]
+    # print(f"num matches: {len(matches_prev)}, num inliers: {len(in_prev_idx)}")
+
+    filtered_matches_prev = [matches_prev[i] for i in in_prev_idx]
+    # sorted_matches_prev = sorted(filtered_matches_prev, key=lambda x: x.distance)[:700]
+    # print(f"num matches: {len(matches_prev)}, num inliers: {len(in_prev_idx)}")
+    # in_prev = np.array([False] * len(sorted_matches_prev))
+    # in_prev[in_prev_idx] = True
+    in_prev = np.array([True] * len(filtered_matches_prev))
+
+    feature_prev, links_prev = db.create_links(desc_l_prev, kp_l_prev, kp_r_prev, filtered_matches_prev, in_prev)
+    db.frameID_to_inliers_percent[frame_idx] = 100 * (len(in_prev_idx) / len(matches_prev))
+    return feature_prev, links_prev
 
 
 def q_4_2(tracking_db: TrackingDB):
@@ -959,6 +1006,7 @@ def q_4_7(tracking_db: TrackingDB):
         # plt.show()
 
     trackId = find_random_track_of_length(tracking_db, 10)
+
     track_last_frame = tracking_db.last_frame_of_track(trackId)
     frames = tracking_db.frames(trackId)
     left_camera_mat = read_kth_camera(track_last_frame)
@@ -990,7 +1038,106 @@ def q_4_7(tracking_db: TrackingDB):
     plot_reprojection_errors(reprojection_erros)
 
 
+import sys
+
+
+def main(arg):
+    global TRANSFORMATIONS
+    TRANSFORMATIONS = []
+    ORB_PATH = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/ORB"
+    AKAZE_PATH = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/AKAZE"
+    SIFT_PATH = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/SIFT"
+    path = r"C:\Users\elyas\University\SLAM video navigation\VAN_ex\code\VAN_ex\dataset\sequences\00"
+    if arg == 'orb':
+        serialized_path = ORB_PATH
+        get_ORB_matcher_lr_matcher()
+    elif arg == 'akaze':
+        serialized_path = AKAZE_PATH
+        get_akaze_matcher_lr_matcher()
+    elif arg == 'sift':
+        get_sift_matcher_lr_matcher()
+        serialized_path = SIFT_PATH
+    else:
+        serialized_path = ORB_PATH
+        get_ORB_matcher_lr_matcher()
+    # start_frame = 500
+    # p = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs"
+    # p = os.path.join(p, arg,'db','db_'+ str(start_frame))
+    # db = create_db_from_middle(p,start_frame,serialized_path,2500)
+    db = create_db(
+        start_frame=0,
+        num_frames=LEN_DATA_SET,
+        save_name=serialized_path,
+        save_every=500,
+        db=None,
+    )
+    db.serialize(serialized_path)
+    np.save('relative_matrices_' + arg + '.npy', np.array(TRANSFORMATIONS))
+
+    db = TrackingDB()
+    db.load(serialized_path)
+    global_transformations = []
+    cameras_locations = []
+
+    TRANSFORMATIONS = np.load('/Users/mac/67604-SLAM-video-navigation/VAN_ex/code/relative_matrices_' + arg + '.npy',
+                              allow_pickle=True)
+    print(f"transformations: {len(TRANSFORMATIONS)}")
+    for i, transformation in enumerate(TRANSFORMATIONS):
+        try:
+            relative_transformation = np.vstack((transformation, np.array([0, 0, 0, 1])))
+            last_transformation = global_transformations[-1] if len(global_transformations) > 0 else M1
+            global_trasnform = relative_transformation @ np.vstack((last_transformation, np.array([0, 0, 0, 1])))
+            global_transformations.append(global_trasnform[0:3, :])
+            rot = global_trasnform[0:3, 0:3]
+            t = global_trasnform[0:3, 3]
+            cameras_locations.append(-rot.T @ t)
+        except:
+
+            last_transformation = global_transformations[-1] if len(global_transformations) > 0 else M1
+            global_transformations.append(last_transformation)
+            cameras_locations.append(cameras_locations[-1] if len(cameras_locations) > 0 else np.array([0, 0, 0]))
+            num_links = len(db.links(i))
+            tracks = db.tracks(i)
+            print(f'error, frame {i} ,num links {num_links} num tracks {len(tracks)}')
+            print(f'transformation {transformation}')
+
+            continue
+
+    # np.save('global_transformations.npy', np.array(global_transformations))
+
+    plt.figure()
+    plt.plot([location[0] for location in cameras_locations], [location[2] for location in cameras_locations])
+    plt.title(f'camera locations, alg={arg}')
+    # plt.show()
+
+    q_4_2(db)
+    q_4_3(db)
+    q_4_4(db)
+    q_4_5(db)
+    q_4_6(db)
+    q_4_7(db)
+    plt.show()
+
+
+def create_db_from_middle(path_to_db, start_frame, serialized_path, num_frames=LEN_DATA_SET):
+    db = TrackingDB()
+    db.load(path_to_db)
+    db = create_db(
+        start_frame=start_frame,
+        num_frames=num_frames,
+        save_name=serialized_path,
+        save_every=500,
+        db=db,
+    )
+    return db
+
+
 if __name__ == '__main__':
+
+    args = ['sift']
+    for arg in args:
+        main(arg)
+    plt.show()
     # print(M1)
     # print(M2)
     # print(K)
@@ -999,25 +1146,5 @@ if __name__ == '__main__':
     # path = r"C:\Users\elyas\University\SLAM video navigation\VAN_ex\code\VAN_ex\dataset\sequences\00"
     # serialized_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/DB_all_after_changing the percent"
     # serialized_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/check50"
-    serialized_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/NEWEST_AKAZE"
-    # serialized_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/NEWEST_SIFT_500"
-    path = r"C:\Users\elyas\University\SLAM video navigation\VAN_ex\code\VAN_ex\dataset\sequences\00"
-    db = create_db(num_frames=LEN_DATA_SET)
-    db.serialize(serialized_path)
-
-    db = TrackingDB()
-    db.load(serialized_path)
-    # print(len(db.frames(7)))
-    # print(db.all_tracks())
-    # for track in db.all_tracks():
-    #     if len(db.frames(track)) < 2:
-    #         print(len(db.frames(track)))
-
-    # q_4_1(db)
-    q_4_2(db)
-    q_4_3(db)
-    q_4_4(db)
-    q_4_5(db)
-    q_4_6(db)
-    q_4_7(db)
-    plt.show()
+    # serialized_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/NEWEST_AKAZE_300"
+    # main()
