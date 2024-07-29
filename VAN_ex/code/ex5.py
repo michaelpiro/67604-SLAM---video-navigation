@@ -7,10 +7,10 @@ import cv2
 import pickle
 from typing import List, Tuple, Dict, Sequence, Optional
 from timeit import default_timer as timer
-from utils.tracking_database import TrackingDB, Link, MatchLocation
+from tracking_database import TrackingDB, Link, MatchLocation
 from tqdm import tqdm
 import random
-from utils.tracking_database import TrackingDB, Link, MatchLocation
+from tracking_database import TrackingDB, Link, MatchLocation
 from ex4 import K, M2, M1, P, Q, triangulate_last_frame
 from gtsam.utils.plot import plot_trajectory, plot_3d_points, set_axes_equal
 from ex3 import rodriguez_to_mat, read_extrinsic_matrices

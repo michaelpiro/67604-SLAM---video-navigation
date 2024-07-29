@@ -6,7 +6,7 @@ import cv2
 import pickle
 from typing import List, Tuple, Dict, Sequence, Optional
 from timeit import default_timer as timer
-from utils.tracking_database import TrackingDB, Link, MatchLocation
+from tracking_database import TrackingDB, Link, MatchLocation
 from tqdm import tqdm
 # from ex4_2_to_6 import q_4_2, q_4_3, q_4_4, q_4_5, q_4_6, q_4_7, find_longest_track_frames
 
