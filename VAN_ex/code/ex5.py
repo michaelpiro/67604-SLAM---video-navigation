@@ -9,6 +9,7 @@ from typing import List, Tuple, Dict, Sequence, Optional
 from timeit import default_timer as timer
 from tracking_database import TrackingDB, Link, MatchLocation
 from tqdm import tqdm
+import arguments
 import random
 from tracking_database import TrackingDB, Link, MatchLocation
 from ex4 import K, M2, M1, P, Q, triangulate_last_frame
@@ -28,7 +29,7 @@ BASE_LINE_SIGN = -1
 # FEATURE.setThreshold(0.005)
 # MATCHER = cv2.BFMatcher(normType=cv2.NORM_L2, crossCheck=False)
 # DATA_PATH = r'C:\Users\elyas\University\SLAM video navigation\VAN_ex\code\VAN_ex\dataset\sequences\00\\'
-DATA_PATH = '/Users/mac/67604-SLAM-video-navigation/VAN_ex/dataset/sequences/00/'
+DATA_PATH = arguments.DATA_PATH
 LEN_DATA_SET = len(os.listdir(DATA_PATH + 'image_0'))
 TRANSFORMATIONS_PATH = 'transformations_ex3.npy'
 
@@ -279,10 +280,10 @@ def get_relevant_tracks_in_keyframes(db, first_frame_idx, last_frame_idx):
     for i in range(first_frame_idx+1, last_frame_idx+1):
         current_frame_id = i
         current_frame_tracks = set(db.tracks(current_frame_id))
-        # intersection = frame_set.intersection(current_frame_tracks)
-        # all_tracks.update(intersection)
-        # frame_set = current_frame_tracks
-        all_tracks.update(current_frame_tracks)
+        intersection = frame_set.intersection(current_frame_tracks)
+        all_tracks.update(intersection)
+        frame_set = current_frame_tracks
+        # all_tracks.update(current_frame_tracks)
 
         # common_tracks = set(db.tracks(current_frame_id)).intersection(set(db.tracks(last_frame_idx)))
         # all_tracks.update(db.tracks(current_frame_id))
@@ -584,17 +585,23 @@ def create_factors_between_keyframes(first_frame_idx, last_frame_idx, db, k_matr
                     reference_triangulated_point = gtsam_frame.backproject(
                         gtsam.StereoPoint2(stereo_point2d[0], stereo_point2d[1], stereo_point2d[2]))
 
-                    if reference_triangulated_point[2] < 0:
-                        print(f"Negative depth for track {track_id} in frame {frame_id}!, {stereo_point2d}")
-                        break
+                    if track_id == 1793 or track_id == 37566 or track_id == 54706:
+                        print(f"Track {track_id} in frame {frame_id}!, {stereo_point2d}")
+                        print(reference_triangulated_point)
+                    assert reference_triangulated_point[2] > 0
+                    # if reference_triangulated_point[2] > 60:
+                        # print(f"Track {track_id} in frame {frame_id}!, {stereo_point2d} z > 60")
 
 
                     initial_estimate.insert(location_symbol, reference_triangulated_point)
 
                 # Create the factor
-                n = np.array([0.2, 0.2, 0.1])*(track_last_frame-frame_id+1) + np.array([1, 1, 1])
-                sigma = gtsam.noiseModel.Diagonal.Sigmas(n)
-                # sigma = gtsam.noiseModel.Isotropic.Sigma(3, 1.0)
+                # n = np.array([0.1, 0.1, 0.5])*(track_last_frame-frame_id+1) + np.array([1, 1, 1])
+                # sigma = gtsam.noiseModel.Diagonal.Sigmas(n)
+                sigma = gtsam.noiseModel.Isotropic.Sigma(3, 10.0)
+                if track_id == 1793 or track_id == 37566 or track_id == 54706:
+                    print(f"link {link}")
+
 
                 graph.add(
                     gtsam.GenericStereoFactor3D(gtsam.StereoPoint2(link.x_left, link.x_right, link.y), sigma,
@@ -686,6 +693,7 @@ def q_5_4(db):
     t = read_extrinsic_matrices()
     ts = np.array(t)
     keyframes_indices = extract_keyframes(db, t)[:]
+    keyframes_indices[0] = (0,6)
     print(f"keyframes {[k[1]-k[0] for k in keyframes_indices]}")
     # keyframes_indices = [(i,i+1) for i in range(0,2500,1)]
     # x = list(range(0,200,5))
@@ -700,6 +708,11 @@ def q_5_4(db):
         graph, initial, cameras_dict, frames_dict = create_graph(db, key_frames[0], key_frames[1], ts)
         optimizer = gtsam.LevenbergMarquardtOptimizer(graph, initial)
         result = optimizer.optimize()
+        has_negative_z = False
+        for value in result:
+            if value.value().z() < 0:
+                has_negative_z = True
+                break
         bundles[i] = {'graph': graph, 'initial': initial, 'cameras_dict': cameras_dict, 'frames_dict': frames_dict,
                       'result': result}
 
@@ -751,7 +764,6 @@ def q_5_4(db):
 
     print_q_5_4(bundles, cameras_locations, cameras_locations2, distance, keyframes_indices)
 
-
 def print_q_5_4(bundles, cameras_locations, cameras_locations2, distance, keyframes_indices):
     first_cam_last_bundle = cameras_locations[-2]
     print(f"first camera of last bundle: {first_cam_last_bundle}")
@@ -785,6 +797,7 @@ def print_q_5_4(bundles, cameras_locations, cameras_locations2, distance, keyfra
     plt.plot([i for i in range(len(distance))], [distance[i] for i in range(len(distance))], 'bo', label='ground truth',
              markersize=1)
     plt.title('Camera distance from ground truth')
+
 
 
 def present_error(camera_symbol, initial, result, location_symbol, worst_factor, title1='', title2=''):
@@ -981,6 +994,7 @@ def optimize_track(db, track_id, transformations, fist_frame_idx, last_frame_idx
 
 def find_bad_tracks(first_frame_idx, last_frame_idx, db, k_matrix,
                     transformations):
+
     # all_tracks_in_keyframes = set()
     gtsam_frames = dict()
     camera_symbols = dict()
@@ -1130,12 +1144,12 @@ def extract_keyframes(db: TrackingDB, transformations):
             old_tracks = new_tracks
             accumalate_angle = (np.abs(calc_locations_angle(t_initial, t2))*180/np.pi)
             t1 = t2
-            print(f"angle {accumalate_angle} dist {dist} common tracks {len(common_tracks)}, frame {j}, i {i}")
+            # print(f"angle {accumalate_angle} dist {dist} common tracks {len(common_tracks)}, frame {j}, i {i}")
 
             if tracks_ratio < track_losing_factor or j == i + max_gap - 1 \
                     or j == num_frames - 1 or dist > max_dist or accumalate_angle > theta_max:
                 keyFrames.append((i, j))
-                i = j+1
+                i = j
                 break
 
 
@@ -1201,9 +1215,9 @@ from ex4_v2 import main
 
 
 def this_main(arg):
-    ORB_PATH = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/ORB/db/db_3359"
-    AKAZE_PATH = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/AKAZE/db/db_3359"
-    SIFT_PATH = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/SIFT/db/db_3359"
+    ORB_PATH = arguments.DATA_HEAD+"docs/ORB/db/db_3359"
+    AKAZE_PATH = arguments.DATA_HEAD+"/docs/AKAZE/db/db_500"
+    SIFT_PATH = arguments.DATA_HEAD+"/docs/SIFT/db/db_3359"
     path = r"C:\Users\elyas\University\SLAM video navigation\VAN_ex\code\VAN_ex\dataset\sequences\00"
     if arg == 'orb':
         serialized_path = ORB_PATH
@@ -1212,14 +1226,36 @@ def this_main(arg):
     elif arg == 'sift':
         serialized_path = SIFT_PATH
     else:
-        serialized_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/pic"
+        serialized_path = arguments.DATA_HEAD+"/docs/pic"
 
     # main(arg)
     db = TrackingDB()
     db.load(serialized_path)
+    print(db.frames(2593))
+    visualize_track(db, 2593)
+    plt.show()
     q_5_4(db)
 
     plt.show()
+
+
+def check_link_twice(db, frame_id):
+    links_frame = db.links(frame_id)
+    seen = set()
+    duplicates = set()
+
+    for link in links_frame:
+        properties = (link.x_left, link.x_right, link.y)
+        if properties in seen:
+            duplicates.add(properties)
+        else:
+            seen.add(properties)
+
+    if duplicates:
+        print(f"Duplicate links found in frame {frame_id}: {duplicates}")
+    else:
+        print(f"No duplicate links found in frame {frame_id}")
+
 
 if __name__ == '__main__':
     import sys

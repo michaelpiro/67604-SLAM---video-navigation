@@ -1,3 +1,5 @@
+import pickle
+
 from matplotlib import pyplot as plt
 
 import arguments
@@ -35,7 +37,18 @@ def get_graph_and_result(tracking_db, keyframe_indices):
                       'result': result, 'keyframes': key_frames}
         graphs.append(graph)
         results.append(result)
+    data = bundles, graphs, results
+    save(data, arguments.BUNDLES_PATH)
     return bundles, graphs, results
+
+""" save TrackingDB to base_filename+'.pkl' file. """
+def save(data, base_filename):
+    if data is not None:
+        filename = base_filename + '.pkl'
+        with open(filename, "wb") as file:
+            pickle.dump(data, file)
+        print('bundle saved to: ', filename)
+
 
 
 def calculate_relative_pose_cov(first_frame_symbol, last_frame_symbol, bundle_graph, result):
@@ -80,8 +93,6 @@ def q_6_1(graph, result, first_frame_symbol, last_frame_symbol):
 
     return relative_pose, relative_cov
 
-def get_frame_symbol(idx):
-    return "c"+str(idx)
 
 def q_6_2(keyframe_indices, kf_graphs, optimised_results,bundles):
     # Initialize the factor graph
@@ -90,12 +101,7 @@ def q_6_2(keyframe_indices, kf_graphs, optimised_results,bundles):
 
     # Iterate through all bundles
     for i in range(len(kf_graphs)):
-        try:
-            print(f"Creating marginals{i}")
-            marginals = gtsam.Marginals(kf_graphs[i], optimised_results[i])
-        except:
-            print(f"Marginals not created, {i}")
-            continue
+
 
         bund = bundles[i]
         cameras_dict = bund['cameras_dict']
@@ -118,6 +124,13 @@ def q_6_2(keyframe_indices, kf_graphs, optimised_results,bundles):
         keys = gtsam.KeyVector()
         keys.append(start_frame_symbol)
         keys.append(end_frame_symbol)
+
+        try:
+            marginals = gtsam.Marginals(kf_graphs[i], optimised_results[i])
+        except Exception as e:
+            print(f"Marginals not created, {i},{e}")
+            continue
+
         # marginals.marginalCovariance(cameras_dict[cam])
         marginal_cov = marginals.jointMarginalCovariance(keys).fullMatrix()
 
@@ -160,28 +173,45 @@ def q_6_2(keyframe_indices, kf_graphs, optimised_results,bundles):
 
     return result, marginals
 
+""" load TrackingDB to base_filename+'.pkl' file. """
+def load(base_filename):
+    filename = base_filename + '.pkl'
+
+    with open(filename, 'rb') as file:
+        data = pickle.load(file)
+        bundles, graphs, results = data
+    print('Tbundkes loaded from', filename)
+    return bundles, graphs, results
+
 if __name__ == '__main__':
     db = TrackingDB()
-    serialized_path = arguments.DATA_HEAD + "/docs/NEWEST_AKAZE"
+    serialized_path = arguments.DATA_HEAD + "/docs/AKAZE/db/db_500"
     db.load(serialized_path)
     t = ex3.read_extrinsic_matrices()
     keyframe_indices = ex5.extract_keyframes(db, t)
-    bundles, graphs, results = get_graph_and_result(db,keyframe_indices)
+    # bundles, graphs, results = get_graph_and_result(db,keyframe_indices)
+    bundles, graphs, results = load(arguments.BUNDLES_PATH)
+    result_65=results[1]
+    graph = graphs[1]
+
+    symbol = gtsam.Symbol('l', 2592)
+    factor = graph.at(2592)
+    print(factor)
+    print(factor.error(result_65))
+    # print()
     print(len(bundles))
-    first_bundle_graph = graphs[1]
-    first_result = results[1]# change depending on the change in the ex5 - we want to only have the first bundle
+    first_bundle_graph = graphs[0]
+    first_result = results[0]# change depending on the change in the ex5 - we want to only have the first bundle
 
     # t = ex5.calculate_transformations(db, 0,arguments.LEN_DATA)
     #todo this is the true transformation the previous one is the one we use
 
-    last_frame_symbol = get_frame_symbol(keyframe_indices[1])
-    first_frame_symbol = get_frame_symbol(0)
-    bundel_0 = bundles[1]
+    first_frame_num, last_frame_num = keyframe_indices[0]
+    bundel_0 = bundles[0]
     cameras = bundel_0['cameras_dict']
-    first_cam_symbol = cameras[4]
-    last_cam_symbol = cameras[keyframe_indices[1][1]]
+    first_cam_symbol = cameras[first_frame_num]
+    last_cam_symbol = cameras[last_frame_num]
     q_6_1(first_bundle_graph,first_result,first_cam_symbol, last_cam_symbol)
-
     q_6_2(keyframe_indices,graphs,results, bundles)
 
 
