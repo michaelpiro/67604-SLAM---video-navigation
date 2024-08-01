@@ -143,7 +143,7 @@ def q_4_5(tracking_db: TrackingDB):
         frames = sorted(inliers_percentage_dict.keys())
         percentages = [inliers_percentage_dict[frame] for frame in frames]
 
-        plt.figure(figsize=(10, 6))
+        plt.figure(figsize=(20, 10))
         plt.plot(frames, percentages)
         plt.xlabel('Frame ID')
         plt.ylabel('Percentage of Inliers')

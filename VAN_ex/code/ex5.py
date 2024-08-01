@@ -682,6 +682,64 @@ def q_5_3(db):
 
     plt.show()
 
+def get_negative_z_points(result):
+    filtered_points = []
+    for key in result.keys():
+        if gtsam.symbolChr(key) == 'l':
+            point = result.atPoint3(key)
+            if point.z() < 0:
+                filtered_points.append(key)
+    return filtered_points
+
+
+def create_graph_with_filtered_points(db, start_frame, end_frame, ts, filtered_points):
+    graph, initial, cameras_dict, frames_dict = create_graph(db, start_frame, end_frame, ts)
+
+    # Add filtered points to the initial estimates
+    filtered_keys = {key for key, point in filtered_points}
+    for key in list(initial.keys()):
+        if key not in filtered_keys:
+            initial.erase(key)
+
+    for key, point in filtered_points:
+        initial.insert(key, point)
+
+    # Add a prior on the first keyframe to ensure the system is well-constrained
+    prior_noise = gtsam.noiseModel.Diagonal.Sigmas(np.array([1e-3] * 6),1)
+    first_key = list(cameras_dict.values())[0]
+    graph.add(gtsam.PriorFactorPose3(first_key, gtsam.Pose3(), prior_noise))
+
+    return graph, initial, cameras_dict, frames_dict
+
+
+def optimize_with_filtered_points(db):
+    bundles = dict()
+    graphs = []
+    results = []
+    t = read_extrinsic_matrices()
+    ts = np.array(t)
+    keyframes_indices = extract_keyframes(db, t)
+
+    for i, key_frames in enumerate(keyframes_indices):
+        graph, initial, cameras_dict, frames_dict = create_graph(db, key_frames[0], key_frames[1], ts)
+        optimizer = gtsam.LevenbergMarquardtOptimizer(graph, initial)
+        result = optimizer.optimize()
+
+        negative_z = get_negative_z_points(result)
+        for key in list(result.keys()):
+            if key not in negative_z:
+                result.erase(key)
+
+        optimizer = gtsam.LevenbergMarquardtOptimizer(graph, result)
+        result = optimizer.optimize()
+
+        bundles[i] = {'graph': graph, 'initial': initial, 'cameras_dict': cameras_dict, 'frames_dict': frames_dict,
+                      'result': result, 'keyframes': key_frames}
+        graphs.append(graph)
+        results.append(result)
+
+    return bundles, graphs, results
+
 
 def q_5_4(db):
     bundles = dict()
@@ -708,11 +766,15 @@ def q_5_4(db):
         graph, initial, cameras_dict, frames_dict = create_graph(db, key_frames[0], key_frames[1], ts)
         optimizer = gtsam.LevenbergMarquardtOptimizer(graph, initial)
         result = optimizer.optimize()
-        has_negative_z = False
-        for value in result:
-            if value.value().z() < 0:
-                has_negative_z = True
-                break
+        negative_z = get_negative_z_points(result)
+        for key in list(graph.keys()):
+            if key not in negative_z:
+                graph.erase(key)
+                initial.erase(key)
+
+        optimizer = gtsam.LevenbergMarquardtOptimizer(graph, result)
+        result = optimizer.optimize()
+
         bundles[i] = {'graph': graph, 'initial': initial, 'cameras_dict': cameras_dict, 'frames_dict': frames_dict,
                       'result': result}
 
@@ -1124,7 +1186,7 @@ def extract_keyframes(db: TrackingDB, transformations):
     minimum_gap = 5
     max_dist = 5.0
     track_losing_factor = 0.3
-    max_gap = 25
+    max_gap = 10
 
     theta_max = 20
 
@@ -1216,7 +1278,7 @@ from ex4_v2 import main
 
 def this_main(arg):
     ORB_PATH = arguments.DATA_HEAD+"docs/ORB/db/db_3359"
-    AKAZE_PATH = arguments.DATA_HEAD+"/docs/AKAZE/db/db_500"
+    AKAZE_PATH = arguments.DATA_HEAD+"/docs/AKAZE/db/db_1000"
     SIFT_PATH = arguments.DATA_HEAD+"/docs/SIFT/db/db_3359"
     path = r"C:\Users\elyas\University\SLAM video navigation\VAN_ex\code\VAN_ex\dataset\sequences\00"
     if arg == 'orb':
@@ -1231,7 +1293,6 @@ def this_main(arg):
     # main(arg)
     db = TrackingDB()
     db.load(serialized_path)
-    print(db.frames(2593))
     visualize_track(db, 2593)
     plt.show()
     q_5_4(db)

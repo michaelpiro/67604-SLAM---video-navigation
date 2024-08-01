@@ -9,6 +9,7 @@ all_frames_serialized_db_path = DATA_HEAD_LINUX + "/docs/DB3000"
 DATA_HEAD_WINDOWS =  r'C:\Users\elyas\University\SLAM video navigation\VAN_ex\code\VAN_ex'
 DATA_PATH_LINUX = DATA_HEAD_LINUX + '/dataset/sequences/00/'
 
+BUNDLES_PATH = DATA_HEAD_MAC + '/docs/bundles_AKAZE'
 LEN_DATA = len(os.listdir(DATA_PATH_MAC))
 data_path = DATA_PATH_MAC
 DATA_PATH = data_path

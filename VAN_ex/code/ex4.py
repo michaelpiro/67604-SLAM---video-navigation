@@ -17,9 +17,10 @@ import random
 NO_ID = -1
 
 FEATURE = cv2.AKAZE_create()
-FEATURE.setNOctaves(2)
-FEATURE.setThreshold(0.001)
-MATCHER = cv2.BFMatcher(normType=cv2.NORM_L2, crossCheck=False)
+FEATURE.setNOctaves(4)
+# FEATURE.setThreshold(0.01)
+print(FEATURE.getThreshold())
+MATCHER = cv2.BFMatcher(normType=cv2.NORM_HAMMING, crossCheck=False)
 # DATA_PATH = r'C:\Users\elyas\University\SLAM video navigation\VAN_ex\code\VAN_ex\dataset\sequences\00\\'
 DATA_PATH = '/Users/mac/67604-SLAM-video-navigation/VAN_ex/dataset/sequences/00/'
 LEN_DATA_SET = len(os.listdir(DATA_PATH + 'image_0'))
@@ -38,8 +39,7 @@ def extract_kps_descs_matches(img_0, img1):
     return kp0, kp1, desc0, desc1, matches
 
 
-
-def triangulate_last_frame(tracking_db: TrackingDB, p, q, links = None):
+def triangulate_last_frame(tracking_db: TrackingDB, p, q, links=None):
     """
     Triangulate the matched points using OpenCV
     :param inliers:
@@ -56,6 +56,10 @@ def triangulate_last_frame(tracking_db: TrackingDB, p, q, links = None):
 
 
 def find_concensus_points_and_idx(matches_lr_0, in_lr_0, matches_l0_l1, matches_lr1, in_lr1):
+    if len(matches_lr_0) != len(in_lr_0):
+        print("bad")
+    assert len(matches_lr_0) == len(in_lr_0)
+    assert len(matches_lr1) == len(in_lr1)
     # Create dictionaries for quick lookup
     # a dict that it's keys are the keypoint of the match in the left image,
     # and the value is the index of the match in the matches array
@@ -77,13 +81,15 @@ def find_concensus_points_and_idx(matches_lr_0, in_lr_0, matches_l0_l1, matches_
             matches.append((matches_lr_0[i0], matches_lr1[i1]))
             matches_l0_l1_good_idx.append(i)
         else:
-            print("bad match")
+            pass
+            # print("bad match")
+    # print(f"good ratio: {len(matches) / len(matches_l0_l1)}")
 
     return np.array(con), np.array(matches), matches_l0_l1_good_idx
 
 
 def transformation_agreement(T, traingulated_pts, prev_left_pix_values, prev_right_pix_values,
-                             ordered_cur_left_pix_values, ordered_cur_right_pix_values, x_condition=False):
+                             ordered_cur_left_pix_values, ordered_cur_right_pix_values, x_condition=True):
     T_4x4 = np.vstack((T, np.array([0, 0, 0, 1])))
     points_4d = np.hstack((traingulated_pts, np.ones((traingulated_pts.shape[0], 1)))).T
     l1_T = K @ T
@@ -93,6 +99,7 @@ def transformation_agreement(T, traingulated_pts, prev_left_pix_values, prev_rig
     transform_to_l0_points = (P @ points_4d).T
     transform_to_l0_points = transform_to_l0_points / transform_to_l0_points[:, 2][:, np.newaxis]
     real_y = prev_left_pix_values[:, 1]
+    y_diff = transform_to_l0_points[:, 1] - real_y
     agree_l0 = np.abs(transform_to_l0_points[:, 1] - real_y) < 2
 
     transform_to_r0_points = (to_the_right @ points_4d).T
@@ -102,7 +109,7 @@ def transformation_agreement(T, traingulated_pts, prev_left_pix_values, prev_rig
     if x_condition:
         real_x_l = prev_left_pix_values[:, 0]
         real_x_r = prev_right_pix_values[:, 0]
-        cond_x = real_x_l > real_x_r
+        cond_x = real_x_l > real_x_r + 2
     else:
         cond_x = np.ones_like(agree_r0)
     agree_0 = np.logical_and(agree_r0, cond_x, agree_l0)
@@ -119,7 +126,7 @@ def transformation_agreement(T, traingulated_pts, prev_left_pix_values, prev_rig
     if x_condition:
         real_x_l = ordered_cur_left_pix_values[:, 0]
         real_x_r = ordered_cur_right_pix_values[:, 0]
-        cond_x = real_x_l > real_x_r
+        cond_x = real_x_l > real_x_r + 2
     else:
         cond_x = np.ones_like(agree_r1)
     agree_1 = np.logical_and(agree_r1, cond_x, agree_l1)
@@ -165,7 +172,7 @@ def ransac_pnp_for_tracking_db(traingulated_pts, matches, links_prev, links_cur)
 
         points_agreed = transformation_agreement(T, traingulated_pts, prev_left_pix_values, prev_right_pix_values,
                                                  ordered_cur_left_pix_values, ordered_cur_right_pix_values,
-                                                 x_condition=False)
+                                                 x_condition=True)
 
         inliers_idx = np.where(points_agreed == True)
         if np.sum(points_agreed) > best_inliers:
@@ -204,7 +211,7 @@ def create_DB(path_to_sequence=r"VAN_ex/code/VAN_ex/dataset/sequences/00", num_o
     in_prev[in_prev_idx] = True
     feature_prev, links_prev = DB.create_links(desc_l_prev, kp_l_prev, kp_r_prev, matches_prev, in_prev)
     DB.add_frame(links=links_prev, left_features=feature_prev, matches_to_previous_left=None, inliers=None)
-    DB.frameID_to_inliers_percent[0] = 100*(len(in_prev_idx)/len(matches_prev))
+    DB.frameID_to_inliers_percent[0] = 100 * (len(in_prev_idx) / len(matches_prev))
 
     for i in tqdm(range(1, num_of_frames)):
         # load the next frames and extract the keypoints and descriptors
@@ -222,33 +229,51 @@ def create_DB(path_to_sequence=r"VAN_ex/code/VAN_ex/dataset/sequences/00", num_o
 
         # extract matches of first left frame and the second left frame
         matches_l_l = MATCHER.match(feature_prev, feature_cur)
+        LEN_FEATURES_PREV = len(feature_prev)
+        LEN_FEATURES_CUR = len(feature_cur)
+        LEN_MATCHES = len(matches_l_l)
+        inliers_cond = np.array([False] * LEN_MATCHES)
         # matches_l_l = np.array(MATCHER.knnMatch(desc_l_prev, desc_l_cur, k=2))
         if type(matches_l_l[0]) is tuple:
             matches_l_l = np.array(matches_l_l)
             matches_l_l = matches_l_l[:, 0]
         else:
             matches_l_l = np.array(matches_l_l)
+        matches_cur = np.array(matches_cur)
+        matches_prev = np.array(matches_prev)
+        con, matches, matches_l0_l1_good_idx = find_concensus_points_and_idx(matches_prev, in_prev, matches_l_l,
+                                                                             matches_cur, in_cur)
+        matches_l0_l1_good_idx = np.array(matches_l0_l1_good_idx)
+        # good_matches = matches_l_l[matches_l0_l1_good_idx]
 
         traingulated_pts = triangulate_last_frame(DB, P, Q)
+        temp_traingulated_pts = traingulated_pts[matches_l0_l1_good_idx]
+        temp_links_prev = np.array(links_prev)[matches_l0_l1_good_idx]
+        temp_matches_l_l = matches_l_l[matches_l0_l1_good_idx]
 
-        relative_transformation, idx = find_best_transformation_ex4(traingulated_pts, matches_l_l, links_prev,
+        relative_transformation, idx = find_best_transformation_ex4(temp_traingulated_pts, temp_matches_l_l,
+                                                                    temp_links_prev,
                                                                     links_cur)
+        # relative_transformation, idx = find_best_transformation_ex4(traingulated_pts, matches_l_l, links_prev,
+        #                                                             links_cur)
 
         # todo it needs to be so that the inliers would be a binary array for the matches of the l to l (matches l_l who are best
         # final_matches = (matches_pairs[:, 0])[idx]
         # final_matches = [match.queryIdx for match in final_matches]
         in_prev_cur = np.array([False] * len(matches_l_l))
-        in_prev_cur[idx] = True
-        DB.add_frame(links_cur, feature_cur, matches_l_l, in_prev_cur)
+        temp_idx = matches_l0_l1_good_idx[idx]
+        in_prev_cur[temp_idx] = True
+        # in_prev_cur[idx] = True
+        DB.add_frame(links_cur, feature_cur, temp_matches_l_l, in_prev_cur)
 
         # update the keypoints, descriptors and matches
         kp_l_prev, kp_r_prev, desc_l_prev, desc_r_prev, matches_prev = kp_l_cur, kp_r_cur, desc_l_cur, \
-            desc_r_prev, matches_cur
+                                                                       desc_r_prev, matches_cur
         feature_prev = feature_cur
+        in_prev = in_cur
         # needs to be only matches from l to prev l who are good
         links_prev = links_cur
     return DB
-
 
 
 def q_4_2(tracking_db: TrackingDB):
@@ -310,7 +335,8 @@ def q_4_3(tracking_db: TrackingDB):
 
     def visualize_track(tracking_db: TrackingDB, trackId: int):
         frames = tracking_db.frames(trackId)
-        plt.figure(figsize=(15, 20))
+        print(f"Track {trackId} has {len(frames)} frames")
+        plt.figure()
         for i in range(0, 6, 1):
             # print(f"Frame {frames[i]}")
             frameId = frames[i]
@@ -485,7 +511,7 @@ def q_4_7(tracking_db: TrackingDB):
         points_vec_left = np.array([link.x_left, link.y, 1])
         points_vec_right = np.array([link.x_right, link.y, 1])
         reprojection_erros[int(track_last_frame - frameId)] = (np.linalg.norm(points_vec_left - projection_left[0:2]),
-                                       np.linalg.norm(points_vec_right - projection_right[0:2]))
+                                                               np.linalg.norm(points_vec_right - projection_right[0:2]))
 
     plot_reprojection_errors(reprojection_erros)
 
@@ -494,17 +520,29 @@ if __name__ == '__main__':
     # print(M1)
     # print(M2)
     # print(K)
-    all_frames_serialized_db_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/DB3000"
-    serialized_db_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/DB_all_after_changing the percent"
+    # all_frames_serialized_db_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/DB3000"
+    # serialized_db_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/DB_all_after_changing the percent"
+    # path = r"C:\Users\elyas\University\SLAM video navigation\VAN_ex\code\VAN_ex\dataset\sequences\00"
+    # serialized_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/DB_all_after_changing the percent"
+    # serialized_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/check50"
+    serialized_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/NEWEST"
     path = r"C:\Users\elyas\University\SLAM video navigation\VAN_ex\code\VAN_ex\dataset\sequences\00"
-    # db = create_DB(path, LEN_DATA_SET)
-    # db.serialize(serialized_db_path)
+    db = create_DB(num_of_frames=500)
+    db.serialize(serialized_path)
+
     db = TrackingDB()
-    db.load(serialized_db_path)
-    q_4_2(db)
-    q_4_3(db)
-    q_4_4(db)
-    q_4_5(db)
-    q_4_6(db)
-    q_4_7(db)
-    plt.show()
+    db.load(serialized_path)
+    print(len(db.frames(7)))
+    print(db.all_tracks())
+    for track in db.all_tracks():
+        if len(db.frames(track)) < 2:
+            print(len(db.frames(track)))
+
+    # q_4_1(db)
+    # q_4_2(db)
+    # q_4_3(db)
+    # q_4_4(db)
+    # q_4_5(db)
+    # q_4_6(db)
+    # q_4_7(db)
+    # plt.show()
