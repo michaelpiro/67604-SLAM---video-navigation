@@ -12,6 +12,7 @@ import gtsam
 from gtsam.utils import plot
 from ex3 import read_extrinsic_matrices
 from ex5 import extract_keyframes, create_factor_graph, get_factor_point, get_factor_symbols, optimize_graph
+import cv2
 
 # global variables:
 # loading data
@@ -69,13 +70,14 @@ def get_graph_and_result(tracking_db):
 
         new_graph, result = optimize_graph(graph, initial)
 
-        all_bundles[i] = {'graph': new_graph, 'initial': result, 'cameras_dict': cameras_dict, 'frames_dict': frames_dict,
-                      'result': result, 'keyframes': key_frames}
+        all_bundles[i] = {'graph': new_graph, 'initial': initial, 'cameras_dict': cameras_dict,
+                          'frames_dict': frames_dict,
+                          'result': result, 'keyframes': key_frames}
 
         all_graphs.append(new_graph)
         all_results.append(result)
 
-    data = all_bundles, graphs, results
+    data = all_bundles, all_graphs, all_results
     save(data, arguments.BUNDLES_PATH)
     return all_bundles, all_graphs, all_results
 
@@ -108,7 +110,6 @@ def calculate_relative_pose_cov(first_frame_symbol, last_frame_symbol, bundle_gr
     # Compute the information matrix
     # information = np.linalg.inv(marginal_cov)
     information = marginals.jointMarginalInformation(keys).fullMatrix()
-    print(marginals.jointMarginalInformation(keys).at(last_frame_symbol,last_frame_symbol))
     # Extract the relative covariance
     relative_cov = np.linalg.inv(information[-6:, -6:])
     return marginals, relative_pose, relative_cov
@@ -147,7 +148,7 @@ def q_6_2(bundles):
     initial_estimate = gtsam.Values()
 
     # graph_scale_factor is for the graph visualization
-    graph_scale_factor = 0.001
+    graph_scale_factor = 0.01
 
     # Iterate through all bundles
     last_pose = None
@@ -165,12 +166,16 @@ def q_6_2(bundles):
         relative_pose = first_frame_pose.between(last_frame_pose)
 
         # extract the relative covariance of the first and last cameras in the bundle
-        marginals = gtsam.Marginals(current_graph, current_result)
-        keys = gtsam.KeyVector()
-        keys.append(start_frame_symbol)
-        keys.append(end_frame_symbol)
-
-        information = marginals.jointMarginalInformation(keys).fullMatrix()
+        try:
+            marginals = gtsam.Marginals(current_graph, current_result)
+            keys = gtsam.KeyVector()
+            keys.append(start_frame_symbol)
+            keys.append(end_frame_symbol)
+            information = marginals.jointMarginalInformation(keys).fullMatrix()
+        except Exception as e:
+            print(f"Error in calculating the relative covariance {e}")
+            # print(f"bundle number: {i}, result at 80145 {current_result.atPoint3(7782220156096297233)}")
+            # print(f"bundle number: {i}, result at 80146 {current_graph.atPoint3(7782220156096297233)}")
 
         # Extract the relative covariance from the information matrix
         relative_cov = np.linalg.inv(information[-6:, -6:]) * graph_scale_factor

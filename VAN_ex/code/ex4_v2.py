@@ -515,10 +515,10 @@ def ransac_pnp_for_tracking_db(matches_l_l, prev_links, cur_links, inliers_perce
 
 
 def calc_ransac_iteration(inliers_percent):
-    sec_prob = 0.9999999999
+    suc_prob = 0.9999999999
     outliers_prob = 1 - (inliers_percent / 100) + 0.0000000001
     min_set_size = 4
-    ransac_iterations = int(np.log(1 - sec_prob) / np.log(1 - np.power(1 - outliers_prob, min_set_size))) + 1
+    ransac_iterations = int(np.log(1 - suc_prob) / np.log(1 - np.power(1 - outliers_prob, min_set_size))) + 1
     return ransac_iterations
 
 

@@ -378,7 +378,7 @@ def create_factor_graph(first_frame_idx, last_frame_idx, db):
                 # Create the factor
                 # n = np.array([0.1, 0.1, 0.5])*(track_last_frame-frame_id+1) + np.array([1, 1, 1])
                 # sigma = gtsam.noiseModel.Diagonal.Sigmas(n)
-                sigma = gtsam.noiseModel.Isotropic.Sigma(3, 1.0)
+                sigma = gtsam.noiseModel.Isotropic.Sigma(3, 0.1)
                 graph.add(
                     gtsam.GenericStereoFactor3D(gtsam.StereoPoint2(link.x_left, link.x_right, link.y), sigma,
                                                 pose_symbol,
@@ -417,6 +417,7 @@ def get_factor_point(factor, gt_values):
 def get_negative_z_points(result, graph):
     """ Remove points with negative z values, from the graph and the result. """
     graph_size = graph.size()
+    new_graph = gtsam.NonlinearFactorGraph()
     values_to_remove = []
     factors_to_remove = []
     for i in range(graph_size):
@@ -427,14 +428,19 @@ def get_negative_z_points(result, graph):
                 camera_symbol, track_symbol = get_factor_symbols(factor)
                 values_to_remove.append(track_symbol)
                 factors_to_remove.append(i)
+            else:
+                new_graph.add(factor)
+        else:
+            new_graph.add(factor)
 
-    for ind in factors_to_remove:
-        # if ind == len(factors_to_remove )
-        graph.remove(ind)
+    # for ind in factors_to_remove:
+    #     # if ind == len(factors_to_remove )
+    #     # graph.remove(ind)
+    #     new_graph.add(graph.at(ind))
     values_to_remove = list(set(values_to_remove))
     for value_to_remove in values_to_remove:
         result.erase(value_to_remove)
-    return result, graph, len(values_to_remove) > 0
+    return result, new_graph, len(values_to_remove) > 0
 
 
 def optimize_graph(graph, initial):
@@ -817,7 +823,7 @@ def extract_keyframes(db: TrackingDB, transformations):
     minimum_gap = 5
     max_dist = 5.0
     track_losing_factor = 0.3
-    max_gap = 10
+    max_gap = 25
 
     theta_max = 20
 
@@ -848,6 +854,8 @@ def extract_keyframes(db: TrackingDB, transformations):
         # Update i to j+1 if no keyframe was added in the inner loop
         if j == min(i + max_gap - 1, num_frames - 1):
             i = j + 1
+
+    print(f"key frames {keyFrames}")
 
     return keyFrames
 
@@ -1118,9 +1126,6 @@ def q_5_3(db):
 
     plot_trajectory(fignum=get_fig_num(), values=result, marginals=marginals, title='trajectory', scale=1)
     # set_axes_equal(0)
-
-
-
 
 def q_5_4(db):
     bundles = dict()
