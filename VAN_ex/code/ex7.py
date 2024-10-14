@@ -6,10 +6,10 @@ import gtsam
 import matplotlib.pyplot as plt
 from gtsam.utils.plot import plot_trajectory
 
-import arguments
-from ex5 import k_object
-from graph import Graph
-from tracking_database import TrackingDB
+from VAN_ex.code import arguments
+from VAN_ex.code.ex5 import k_object
+from VAN_ex.code.graph import Graph
+from VAN_ex.code.tracking_database import TrackingDB
 from ex6 import load
 import numpy as np
 import cv2
@@ -17,6 +17,7 @@ from ex3 import read_extrinsic_matrices
 from ex4_v2 import rodriguez_to_mat, transformation_agreement, K
 from ex5 import get_inverse
 from ex1 import read_images
+from ex6 import save
 
 MATCHER = cv2.BFMatcher(normType=cv2.NORM_HAMMING, crossCheck=False)
 
@@ -28,7 +29,7 @@ CAMERA_SYMBOL = 'c'
 relative_covariance_dict = dict()
 cov_dijkstra_graph = Graph()
 
-PATH_TO_DB = serialized_path = arguments.DATA_HEAD + "/docs/db/AKAZE/db_3359"
+PATH_TO_DB = serialized_path = arguments.DATA_HEAD + "/docs/AKAZE/db/db_3359"
 P0 = gtsam.Pose3(gtsam.Rot3(np.eye(3)), gtsam.Point3(np.zeros(3)))
 
 
@@ -72,19 +73,14 @@ def q_7_4(pose_grpah, result, relative_pose, relative_cov, start_frame, end_fram
     new_result = optimizer.optimize()
 
     # add the edge to the dijkstra graph
-    cov_dijkstra_graph.add_edge(start_frame_symbol, end_frame_symbol, relative_cov)
+    cov_dijkstra_graph.add_edge(start_frame, end_frame, relative_cov)
+    # init_dijksra_graph_relative_covariance_dict(new_result, pose_grpah, relative_covariance_dict,
+    #                                             cov_dijkstra_graph)
 
     return pose_grpah, new_result
 
 
 def get_relative_consecutive_covariance(c1, c2, marginals):
-    """
-    get therelative covariance between 2 consecutive poses
-    :param c1: pose
-    :param c2: pose
-    :param marginals: the marginals between the poses
-    :return: the covariance between c1 and c2
-    """
     if c2 == c1:
         keys = gtsam.KeyVector()
         keys.append(c1)
@@ -107,12 +103,6 @@ def get_relative_consecutive_covariance(c1, c2, marginals):
 
 
 def get_relative_covariance(index_list, marginals):
-    """
-    get the relatibe covariance between all the poses
-    :param index_list: the indexes of the poses
-    :param marginals: the marginals between the poses
-    :return: the sum of the relative covariance between all the poses
-    """
     cov_sum = None
     if len(index_list) == 1:
         c1 = gtsam.symbol('c', index_list[0])
@@ -129,16 +119,11 @@ def get_relative_covariance(index_list, marginals):
     return cov_sum
 
 
+def get_relative_pose(pose):
+    pass
+
 
 def calculate_mahalanobis_distance(c_n, c_i, result, relative_information):
-    """
-    calculate mahalanobis distance between 2 poses
-    :param c_n: last pose
-    :param c_i: first pose
-    :param result: the result, optimized estimates of the poses
-    :param relative_information:  the relative information of the poses
-    :return: the mahalanobis distance between the poses
-    """
     pose_c_n = result.atPose3(c_n)
     pose_c_i = result.atPose3(c_i)
     relative_pose = pose_c_n.between(pose_c_i)
@@ -160,24 +145,10 @@ def calculate_mahalanobis_distance(c_n, c_i, result, relative_information):
 
 
 def get_symbol(index):
-    """
-    get the symbol for the index
-    :param index: number
-    :return: the symbol for the index, gtsam symbol of c, index.
-    """
     return gtsam.symbol('c', index)
 
 
 def check_candidate(c_n_idx, c_i_idx, marginals, result, index_list):
-    """
-    check candidates for the loop closure
-    :param c_n_idx: the index of the last pose
-    :param c_i_idx: the index of the first pose
-    :param marginals: the marginals between the poses
-    :param result: the optimized estimates of the poses
-    :param index_list:the list of indexes of the poses
-    :return: mahalanobis distance between the poses
-    """
     cur_index_list = cov_dijkstra_graph.get_shortest_path(index_list[c_i_idx], index_list[c_n_idx])
     c_n_giving_c_i = get_relative_covariance(cur_index_list, marginals)
     # c_n_giving_c_i = sum_covariance + get_relative_consecutive_covariance(gtsam.symbol('c', index_list[c_i_idx]),
@@ -212,7 +183,6 @@ def get_path(c_n, c_i, result):
     return [index for index in range(c_i, c_n + 1)]
 
 
-
 def load(base_filename):
     """ load TrackingDB to base_filename+'.pkl' file. """
     filename = base_filename + '.pkl'
@@ -232,8 +202,8 @@ def get_index_list(result):
 
 
 def init_dijksra_graph_relative_covariance_dict(result_without_closure, pose_graph_without_closure,
-                                                cov_dict,dijkstra_graph):
-    marginals = gtsam.Marginals(pose_graph_without_closure,result_without_closure)
+                                                cov_dict, dijkstra_graph):
+    marginals = gtsam.Marginals(pose_graph_without_closure, result_without_closure)
     index_list = get_index_list(result_without_closure)
     for i in range(len(index_list) - 1):
         c1 = gtsam.symbol('c', index_list[i])
@@ -258,9 +228,9 @@ def q_7_5_6(marginals, result_without_closure, pose_graph_without_closure):
     dijkstra_graph_without_closure = Graph()
     marginals_without_closure = gtsam.Marginals(pose_graph_without_closure, result_without_closure)
     rel_cov_before_loop_c, dijkstra_graph = init_dijksra_graph_relative_covariance_dict(result_without_closure,
-                                                                                           pose_graph_without_closure,
-                                                                                           relative_covariance_dict_without_closure,
-                                                                                         dijkstra_graph_without_closure)
+                                                                                        pose_graph_without_closure,
+                                                                                        relative_covariance_dict_without_closure,
+                                                                                        dijkstra_graph_without_closure)
 
     index_list = get_index_list(result_without_closure)
     uncertinties_before = []
@@ -289,7 +259,7 @@ def find_loops(data):
     result = data[1]
     marginals = gtsam.Marginals(pose_graph, result)
     index_list = get_index_list(result)
-    init_dijksra_graph_relative_covariance_dict(result,pose_graph, relative_covariance_dict, cov_dijkstra_graph)
+    init_dijksra_graph_relative_covariance_dict(result, pose_graph, relative_covariance_dict, cov_dijkstra_graph)
     # print(f"relative_covariance_lst: {relative_covariance_dict}")
     familiar_path = False
     frames_in_familiar_path = []
@@ -310,6 +280,7 @@ def find_loops(data):
                 # todo continue to and UPDATE THE GRAPH
                 pose_graph, result = insert_to_pose_graph(camera_number, best_candidate,
                                                           matches, pose_graph, result)
+                print(f"loop detected between camera {camera_number} and camera {best_candidate}")
         else:
             if len(frames_in_familiar_path) > 0:
                 # print(f"end of path that started on camera {frames_in_familiar_path[0]} and ended in"
@@ -320,6 +291,9 @@ def find_loops(data):
                         # insert the last frame that passes the best candidate matches test on the path
                         pose_graph, result = insert_to_pose_graph(camera_number, best_candidate,
                                                                   matches, pose_graph, result)
+                        print(
+                            f"end of familiar segment, loop closure between camera {camera_number} "
+                            f"and camera {best_candidate}")
                         break
                 familiar_path = False
                 frames_in_familiar_path = []
@@ -337,7 +311,7 @@ def plot_graph_along(camera_number, pose_graph, result):
                           f" camera {camera_number}, Q_7_5_2")
 
 
-def insert_to_pose_graph(camera_number, best_candidate,matches, pose_graph, result):
+def insert_to_pose_graph(camera_number, best_candidate, matches, pose_graph, result):
     """
     insert to the pose graph and to the reult and dijkstra graph
     :param camera_number: the number of the camera(not symbol)
@@ -373,7 +347,7 @@ for cam in mat:
 def ransac_pnp(matches_l_l, prev_links, cur_links):
     """ Perform RANSAC to find the best transformation"""
     ransac_iterations = 10000
-    print(f"ransac_iterations: {ransac_iterations}")
+    # print(f"ransac_iterations: {ransac_iterations}")
 
     filtered_links_cur = []
     filtered_links_prev = []
@@ -594,7 +568,7 @@ def consensus_matches(reference_key_frame, candidates_index_lst, data_base: Trac
     for candidate in candidates_index_lst:
         # T, matches_idx,_ = ransac_pnp(matches_l_l, )
         matches = check_candidate_match(reference_key_frame, candidate, data_base)
-        print(f"number of inliers: {len(matches)}")
+        # print(f"number of inliers: {len(matches)}")
         if len(matches) > INLIERS_THRESHOLD:
             best_candidate = candidate
             best_matches = matches
@@ -658,10 +632,6 @@ def plot_matches(first_frame, second_frame):
 
 
 def get_locations_from_gtsam(result):
-    """
-    get all the locations in the graph from result, using gtsam
-    return: gtsam result.
-    """
     locations = []
     index_list = get_index_list(result)
     for index in index_list:
@@ -700,8 +670,13 @@ def q_7_5_5(result, result_without_closure):
     locations = get_locations_from_gtsam(result)
     locations_without_closure = get_locations_from_gtsam(result_without_closure)
     ground_truth_locations = get_locations_ground_truths()
+    print(f"locations: {locations}")
+    print(f"locations type: {type(locations)}")
+    print(f"locations i type: {type(locations[0])}")
     plt.figure()
-    plt.plot([np.linalg.norm(locations[i] - ground_truth_locations[i]) for i in range(len(locations))], 'r-')
+    plt.plot([np.linalg.norm(locations[i] - ground_truth_locations[i]) for i in range(len(locations))], color='r', label="L2 norm")
+    plt.plot([np.linalg.norm(locations[i][1] - ground_truth_locations[i][1]) for i in range(len(locations))], 'r-')
+
     plt.plot([np.linalg.norm(locations_without_closure[i] - ground_truth_locations[i]) for i in
               range(len(locations_without_closure))], 'b-')
     plt.title("q7_5_5 graph red: with closure, blue: without closure")
@@ -711,6 +686,15 @@ def q_7_5_5(result, result_without_closure):
     plt.plot([np.linalg.norm(locations_without_closure[i][1] - ground_truth_locations[i][1]) for i in
               range(len(locations_without_closure))], 'b-')
     plt.title("axis y, error")
+
+    index_arr = np.array([0,2])
+    plt.figure()
+    plt.plot([np.linalg.norm(locations[i][index_arr] - ground_truth_locations[i][index_arr]) for i in range(len(locations))], 'r-')
+    plt.plot([np.linalg.norm(locations_without_closure[i][index_arr] - ground_truth_locations[i][index_arr]) for i in
+              range(len(locations_without_closure))], 'b-')
+    plt.title("X Z ERROR")
+
+
     plt.show()
 
 
@@ -736,20 +720,25 @@ def q_7_5(pose_graph, result, data):
     marginals = gtsam.Marginals(pose_graph, result)
     q_7_5_6(marginals, result_without_closure, pose_graph_without_closure)
 
+
 if __name__ == '__main__':
     # load data
     path = arguments.DATA_HEAD + '/docs/pose_graph_result'
     data_list = load(path)
 
+    init_dijksra_graph_relative_covariance_dict(data_list[1], data_list[0], relative_covariance_dict,
+                                                cov_dijkstra_graph)
 
-    init_dijksra_graph_relative_covariance_dict(data_list[1], data_list[0],relative_covariance_dict,cov_dijkstra_graph)
+    # marginals = gtsam.Marginals(data_list[0], data_list[1])
+    # q_7_5_6(marginals, data_list[1], data_list[0])
 
-    marginals = gtsam.Marginals(data_list[0], data_list[1])
-    q_7_5_6(marginals, data_list[1], data_list[0])
+    # plt.show()
+    # pg, res, relative_covariance_dict, cov_dijkstra_graph = load("updated_pose_graph_results")
 
-
-    plt.show()
+    # data_list = []
     pg, res = find_loops(data_list)
+    save((pg, res, relative_covariance_dict, cov_dijkstra_graph), "updated_pose_graph_results")
+
     q_7_5(pg, res, data_list)
     plot_trajectory(0, res, title="updated pose graph")
     # print("pipi")
