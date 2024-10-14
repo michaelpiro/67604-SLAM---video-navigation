@@ -670,6 +670,9 @@ def q_7_5_5(result, result_without_closure):
     locations = get_locations_from_gtsam(result)
     locations_without_closure = get_locations_from_gtsam(result_without_closure)
     ground_truth_locations = get_locations_ground_truths()
+    print(f"locations: {locations}")
+    print(f"locations type: {type(locations)}")
+    print(f"locations i type: {type(locations[0])}")
     plt.figure()
     plt.plot([np.linalg.norm(locations[i] - ground_truth_locations[i]) for i in range(len(locations))], 'r-')
     plt.plot([np.linalg.norm(locations_without_closure[i] - ground_truth_locations[i]) for i in
@@ -681,6 +684,15 @@ def q_7_5_5(result, result_without_closure):
     plt.plot([np.linalg.norm(locations_without_closure[i][1] - ground_truth_locations[i][1]) for i in
               range(len(locations_without_closure))], 'b-')
     plt.title("axis y, error")
+
+    index_arr = np.array([0,2])
+    plt.figure()
+    plt.plot([np.linalg.norm(locations[i][index_arr] - ground_truth_locations[i][index_arr]) for i in range(len(locations))], 'r-')
+    plt.plot([np.linalg.norm(locations_without_closure[i][index_arr] - ground_truth_locations[i][index_arr]) for i in
+              range(len(locations_without_closure))], 'b-')
+    plt.title("X Z ERROR")
+
+
     plt.show()
 
 
