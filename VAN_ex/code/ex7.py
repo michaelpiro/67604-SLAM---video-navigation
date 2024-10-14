@@ -674,7 +674,9 @@ def q_7_5_5(result, result_without_closure):
     print(f"locations type: {type(locations)}")
     print(f"locations i type: {type(locations[0])}")
     plt.figure()
-    plt.plot([np.linalg.norm(locations[i] - ground_truth_locations[i]) for i in range(len(locations))], 'r-')
+    plt.plot([np.linalg.norm(locations[i] - ground_truth_locations[i]) for i in range(len(locations))], color='r', label="L2 norm")
+    plt.plot([np.linalg.norm(locations[i][1] - ground_truth_locations[i][1]) for i in range(len(locations))], 'r-')
+
     plt.plot([np.linalg.norm(locations_without_closure[i] - ground_truth_locations[i]) for i in
               range(len(locations_without_closure))], 'b-')
     plt.title("q7_5_5 graph red: with closure, blue: without closure")
