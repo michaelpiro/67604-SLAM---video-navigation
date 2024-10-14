@@ -240,10 +240,11 @@ def load(base_filename):
 
 if __name__ == '__main__':
     db = TrackingDB()
-    serialized_path = arguments.DATA_HEAD + "/docs/AKAZE/db/db_3359"
+    serialized_path = arguments.DATA_HEAD + "/docs/db/AKAZE/db_3359"
     db.load(serialized_path)
     # bundles, graphs, results = get_graph_and_result(db)
     bundles, graphs, results = load(arguments.BUNDLES_PATH)
     q_6_1(bundles[0])
-    q_6_2(bundles)
+    end_results, marginals = q_6_2(bundles)
+    save(end_results, "pose_graph_result")
     plt.show()
