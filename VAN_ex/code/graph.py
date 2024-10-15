@@ -8,7 +8,7 @@ class Graph:
         self.graph = dict()
 
     def norm(self, cov: np.ndarray) -> float:
-        return np.abs(np.linalg.det(cov))
+        return np.linalg.det(cov)
 
     def add_edge(self, v1, v2, cov):
         weight = self.norm(cov)
