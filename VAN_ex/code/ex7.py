@@ -677,8 +677,8 @@ def q_7_5(pose_graph, result, data):
 
     # Q_7_5_2
     plot_graph_along(0, pose_graph_without_closure, result_without_closure)
-    # plt.show()
-    # plot_pose_graphs_XZ_ground_truth(result, result_without_closure, pose_graph, pose_graph_without_closure)
+
+    plot_pose_graphs_XZ_ground_truth(result, result_without_closure, pose_graph, pose_graph_without_closure)
 
     # q7_5_3
     plot_matches(1488, 42)
