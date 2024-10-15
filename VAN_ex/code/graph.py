@@ -1,7 +1,6 @@
 import heapq
 import numpy as np
 
-#todo: add the norm function check if the sum of the covariances is not missed by our method
 
 class Graph:
 
@@ -9,7 +8,7 @@ class Graph:
         self.graph = dict()
 
     def norm(self, cov: np.ndarray) -> float:
-        return np.linalg.det(cov)
+        return np.abs(np.linalg.det(cov))
 
     def add_edge(self, v1, v2, cov):
         weight = self.norm(cov)
