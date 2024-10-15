@@ -308,7 +308,10 @@ def plot_graph_along(camera_number, pose_graph, result):
     marginals = gtsam.Marginals(pose_graph, result)
     plot_trajectory(camera_number, result, marginals=marginals,
                     title=f"graph plotted along the process after closure on"
-                          f" camera {camera_number}, Q_7_5_2")
+                          f" camera {camera_number}, Q_7_5_4")
+    # plot_trajectory(camera_number, result, scale=0.1,
+    #                 title=f"graph plotted along the process after closure on"
+    #                       f" camera {camera_number}, Q_7_5_2")
 
 
 def insert_to_pose_graph(camera_number, best_candidate, matches, pose_graph, result):
@@ -638,6 +641,9 @@ def get_locations_from_gtsam(result):
         pose = result.atPose3(gtsam.symbol(CAMERA_SYMBOL, index))
         location = get_camera_location_from_gtsam(pose)
         # assert location == pose.translation()
+        assert location[0] == pose.x()
+        assert location[1] == pose.y()
+        assert location[2] == pose.z()
         locations.append(location)
     return locations
 
@@ -670,32 +676,120 @@ def q_7_5_5(result, result_without_closure):
     locations = get_locations_from_gtsam(result)
     locations_without_closure = get_locations_from_gtsam(result_without_closure)
     ground_truth_locations = get_locations_ground_truths()
-    # print(f"locations: {locations}")
-    # print(f"locations type: {type(locations)}")
-    # print(f"locations i type: {type(locations[0])}")
-    plt.figure()
-    plt.plot([np.linalg.norm(locations[i] - ground_truth_locations[i]) for i in range(len(locations))], color='r', label="L2 norm")
-    plt.plot([np.linalg.norm(locations[i][1] - ground_truth_locations[i][1]) for i in range(len(locations))], 'r-')
 
+    plt.figure()
+    plt.plot([np.linalg.norm(locations[i] - ground_truth_locations[i]) for i in range(len(locations))], color='r',
+             label="L2 norm")
+    plt.plot([np.linalg.norm(locations[i][0] - ground_truth_locations[i][0]) for i in range(len(locations))], color='b',
+             label="x error")
+    plt.plot([np.linalg.norm(locations[i][1] - ground_truth_locations[i][1]) for i in range(len(locations))], color='g',
+             label="y error")
+    plt.plot([np.linalg.norm(locations[i][2] - ground_truth_locations[i][2]) for i in range(len(locations))], color='y',
+             label="z error")
+
+    plt.legend()
+    plt.title("location error with loop closure")
+
+    plt.figure()
     plt.plot([np.linalg.norm(locations_without_closure[i] - ground_truth_locations[i]) for i in
-              range(len(locations_without_closure))], 'b-')
-    plt.title("q7_5_5 graph red: with closure, blue: without closure")
-
-    plt.figure()
-    plt.plot([np.linalg.norm(locations[i][1] - ground_truth_locations[i][1]) for i in range(len(locations))], 'r-')
+              range(len(locations_without_closure))], color='r', label="L2 norm")
+    plt.plot([np.linalg.norm(locations_without_closure[i][0] - ground_truth_locations[i][0]) for i in
+              range(len(locations_without_closure))], color='b', label="x error")
     plt.plot([np.linalg.norm(locations_without_closure[i][1] - ground_truth_locations[i][1]) for i in
-              range(len(locations_without_closure))], 'b-')
-    plt.title("axis y, error")
+              range(len(locations_without_closure))], color='g', label="y error")
+    plt.plot([np.linalg.norm(locations_without_closure[i][2] - ground_truth_locations[i][2]) for i in
+              range(len(locations_without_closure))], color='y', label="z error")
 
-    index_arr = np.array([0,2])
+    plt.legend()
+    plt.title("location error without loop closure")
+
+
+
+def plot_pose_graphs_XZ_ground_truth(results_with_closure, results_without_closure, pose_graph_closure, pose_graph_no_closure):
     plt.figure()
-    plt.plot([np.linalg.norm(locations[i][index_arr] - ground_truth_locations[i][index_arr]) for i in range(len(locations))], 'r-')
-    plt.plot([np.linalg.norm(locations_without_closure[i][index_arr] - ground_truth_locations[i][index_arr]) for i in
-              range(len(locations_without_closure))], 'b-')
-    plt.title("X Z ERROR")
 
+    cameras_idx = get_index_list(results_with_closure)
+    ground_truth_locations = get_locations_ground_truths()
+    truth_x = [ground_truth_locations[i][0] for i in cameras_idx]
+    truth_z = [ground_truth_locations[i][2] for i in cameras_idx]
+    truth_y = [ground_truth_locations[i][1] for i in cameras_idx]
+    plt.plot(truth_x, truth_z, 'g.', label="ground truth", markersize=0.9)
 
+    # Then 3D poses, if any
+    poses = gtsam.utilities.allPose3s(results_with_closure)
+    marginals_closure = gtsam.Marginals(pose_graph_closure, results_with_closure)
+    x_list_closure = []
+    z_list_closure = []
+    y_list_closure = []
+    cov_closure = []
+    location_uncertainty_closure = []
+    for key in poses.keys():
+        pose = poses.atPose3(key)
+        x_list_closure.append(pose.x())
+        z_list_closure.append(pose.z())
+        y_list_closure.append(pose.y())
+        marginal_covariance = marginals_closure.marginalCovariance(key)
+        location_uncertainty_closure.append(np.linalg.det(marginal_covariance[3:,3:]))
+        cov_closure.append(np.linalg.det(marginal_covariance))
+
+    plt.plot(x_list_closure, z_list_closure, 'r.', label="with closure", markersize=0.9)
+
+    poses = gtsam.utilities.allPose3s(results_without_closure)
+    marginals_no_closure = gtsam.Marginals(pose_graph_no_closure, results_without_closure)
+    x_list = []
+    z_list = []
+    y_list = []
+    cov_without_closure = []
+    location_uncertainty = []
+    for key in poses.keys():
+        pose = poses.atPose3(key)
+        x_list.append(pose.x())
+        z_list.append(pose.z())
+        y_list.append(pose.y())
+        marginal_covariance = marginals_no_closure.marginalCovariance(key)
+        location_uncertainty.append(np.linalg.det(marginal_covariance[3:,3:]))
+        cov_without_closure.append(np.linalg.det(marginal_covariance))
+    plt.plot(x_list, z_list, 'b.', label="without closure", markersize=0.9)
+    plt.title("pose graph with and without closure")
+    plt.legend()
+
+    plt.figure()
+    diff_closure = [
+        np.linalg.norm([x_list_closure[i] - truth_x[i], y_list_closure[i] - truth_y[i], z_list_closure[i] - truth_z[i]])
+        for i in range(len(x_list_closure))]
+    diff_no_closure = [
+        np.linalg.norm([x_list[i] - truth_x[i], y_list[i] - truth_y[i], z_list[i] - truth_z[i]]) for i in
+        range(len(x_list))]
+    plt.plot(diff_closure, 'r-', label="abs error with closure")
+    plt.plot(diff_no_closure, 'b-', label="abs error without closure")
+    plt.title("absulute error with and without closure")
+    plt.legend()
+
+    plt.figure()
+    cov_closure = np.array(cov_closure)
+    cov_without_closure = np.array(cov_without_closure)
+
+    log_closer = np.log(cov_closure)
+    log_without_closure = np.log(cov_without_closure)
+
+    log_uncertainty_closure = np.log(np.array(location_uncertainty_closure))
+    log_uncertainty = np.log(np.array(location_uncertainty))
+    # plt.plot(cov_closure, 'r-', label="with closure")
+    # plt.plot(cov_without_closure, 'b-', label="without closure")
+    plt.plot(log_closer, 'r-', label="with closure")
+    plt.plot(log_without_closure, 'b-', label="without closure")
+    plt.title("log det of covariance with and without closure")
+    plt.legend()
+
+    plt.figure()
+    plt.plot(log_uncertainty_closure, 'r-', label="with closure")
+    plt.plot(log_uncertainty, 'b-', label="without closure")
+    plt.title("log location uncertainty with and without closure")
+    plt.legend()
     plt.show()
+
+    # plt.show()
+
 
 
 def q_7_5(pose_graph, result, data):
@@ -705,6 +799,9 @@ def q_7_5(pose_graph, result, data):
 
     # Q_7_5_2
     plot_graph_along(0, pose_graph_without_closure, result_without_closure)
+    plt.show()
+    # plot_pose_graphs_XZ_ground_truth(result, result_without_closure, pose_graph, pose_graph_without_closure)
+    # plt.show()
 
     # q7_5_3
     plot_matches(1488, 42)
@@ -726,8 +823,8 @@ if __name__ == '__main__':
     path = arguments.DATA_HEAD + '/docs/pose_graph_result'
     data_list = load(path)
 
-    init_dijksra_graph_relative_covariance_dict(data_list[1], data_list[0], relative_covariance_dict,
-                                                cov_dijkstra_graph)
+    # init_dijksra_graph_relative_covariance_dict(data_list[1], data_list[0], relative_covariance_dict,
+    #                                             cov_dijkstra_graph)
 
     # marginals = gtsam.Marginals(data_list[0], data_list[1])
     # q_7_5_6(marginals, data_list[1], data_list[0])
@@ -736,10 +833,11 @@ if __name__ == '__main__':
     # pg, res, relative_covariance_dict, cov_dijkstra_graph = load("updated_pose_graph_results")
 
     # data_list = []
+
     pg, res = find_loops(data_list)
     save((pg, res, relative_covariance_dict, cov_dijkstra_graph), "updated_pose_graph_results")
-
+    # pg, res, relative_covariance_dict, cov_dijkstra_graph = load("updated_pose_graph_results")
     q_7_5(pg, res, data_list)
-    plot_trajectory(0, res, title="updated pose graph")
+    plot_trajectory(0, res, title="updated pose graph", scale=1)
     # print("pipi")
     plt.show()
