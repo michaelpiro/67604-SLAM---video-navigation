@@ -1,14 +1,8 @@
 import os
 import cv2
 import numpy as np
-from final_project.arguments import *
-MAC = True
-GROUND_TRUTH_PATH = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/dataset/poses/00.txt"
-LEN_DATA_SET = len(os.listdir(DATA_PATH + 'image_0'))
 
-def rodriguez_to_mat(rvec, tvec):
-    rot, _ = cv2.Rodrigues(rvec)
-    return np.hstack((rot, tvec))
+from final_project.arguments import DATA_PATH, GROUND_TRUTH_PATH, LEN_DATA_SET
 
 
 def read_images(idx):
@@ -25,19 +19,8 @@ def read_images(idx):
     return img1, img2
 
 
-def calc_ransac_iteration(inliers_percent):
-    suc_prob = 0.9999999999
-    outliers_prob = 1 - (inliers_percent / 100) + 0.0000000001
-    min_set_size = 4
-    ransac_iterations = int(np.log(1 - suc_prob) / np.log(1 - np.power(1 - outliers_prob, min_set_size))) + 1
-    return ransac_iterations
-
-
 def read_cameras():
-    if MAC:
-        data_path = '/Users/mac/67604-SLAM-video-navigation/VAN_ex/dataset/sequences/00/'
-    else:
-        data_path = DATA_PATH
+    data_path = DATA_PATH
     with open(data_path + 'calib.txt') as f:
         l1 = f.readline().split()[1:]  # skip first token
         l2 = f.readline().split()[1:]  # skip first token
@@ -49,7 +32,6 @@ def read_cameras():
     m1 = np.linalg.inv(k) @ m1
     m2 = np.linalg.inv(k) @ m2
     return k, m1, m2
-
 
 def read_extrinsic_matrices(file_path=GROUND_TRUTH_PATH, n=LEN_DATA_SET):
     """
@@ -77,16 +59,13 @@ def read_extrinsic_matrices(file_path=GROUND_TRUTH_PATH, n=LEN_DATA_SET):
 
     return extrinsic_matrices
 
-
-def get_ground_truth_locations():
-    all_transformations = read_extrinsic_matrices()
-    cameras_locations2 = []
-    for cam in all_transformations:
-        rot = cam[:3, :3]
-        t = cam[:3, 3]
-        cameras_locations2.append(-rot.T @ t)
-    return cameras_locations2
-
-
-K, M1, M2 = read_cameras()
-P, Q = K @ M1, K @ M2
+def read_kth_camera(k):
+    filename = '/Users/mac/67604-SLAM-video-navigation/VAN_ex/dataset/poses/00.txt'
+    with open(filename, 'r') as file:
+        for current_line_number, line in enumerate(file, start=1):
+            if current_line_number == k:
+                camera = line.strip()
+                break
+    numbers = list(map(float, camera.split()))
+    matrix = np.array(numbers).reshape(3, 4)
+    return matrix
