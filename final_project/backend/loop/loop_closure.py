@@ -21,21 +21,23 @@ import cv2
 
 # Initialize the BFMatcher with Hamming distance and no cross-checking
 from final_project import arguments
-from final_project.Inputs import read_extrinsic_matrices
+from final_project.Inputs import read_extrinsic_matrices, read_images
 from final_project.algorithms.ransac import get_pixels_from_links, transformation_agreement
 from final_project.algorithms.triangulation import triangulate_links
-from final_project.backend.GTSam.bundle import K_OBJECT
-from final_project.backend.GTSam.gtsam_utils import get_inverse
+from final_project.backend.GTSam.bundle import K_OBJECT, optimize_graph
+from final_project.backend.GTSam.gtsam_utils import get_inverse, save
 from final_project.backend.GTSam.pose_graph import PoseGraph, calculate_relative_pose_cov
 from final_project.backend.database.tracking_database import TrackingDB
 from final_project.backend.loop.graph import Graph
-from final_project.utils import P, Q, K, rodriguez_to_mat, read_images
+from final_project.utils import P, Q, K, rodriguez_to_mat
+
 
 MATCHER = cv2.BFMatcher(normType=cv2.NORM_HAMMING, crossCheck=False)
 
 # Threshold constants for Mahalanobis distance and inliers
-MAHALANOBIS_THRESHOLD = 1000
-INLIERS_THRESHOLD = 200
+MAHALANOBIS_THRESHOLD = 2700
+INLIERS_THRESHOLD = 130
+FAR_MAHALANOBIS_THRESHOLD = MAHALANOBIS_THRESHOLD * 7
 
 # Symbols used for locations and cameras in the pose graph
 LOCATION_SYMBOL = 'l'
@@ -66,6 +68,7 @@ def get_tracking_database(path_do_db_file=PATH_TO_DB):
 
 # Load the tracking database
 db = get_tracking_database(PATH_TO_DB)
+
 
 # from ex4_v2 import calc_ransac_iteration, triangulate_links, get_pixels_from_links, P, Q
 # from ex6 import calculate_relative_pose_cov
@@ -268,10 +271,12 @@ def get_good_candidates(c_n_index, marginals, result, index_list):
     # Iterate through potential candidates ensuring a minimum frame gap
     for c_i_index in range(0, last_index_to_check, 1):
         mahalanobis_distance = check_candidate(c_n_index, c_i_index, marginals, result, index_list)
-        print(f'Mahalanobis distance between {c_n_index} and {c_i_index}: {mahalanobis_distance}')
+        # print(f'Mahalanobis distance between {c_n_index} and {c_i_index}: {mahalanobis_distance}')
         if mahalanobis_distance < MAHALANOBIS_THRESHOLD:
             candidates.append(index_list[c_i_index])
-        elif mahalanobis_distance > MAHALANOBIS_THRESHOLD * 5:
+            print(
+                f'added candidate {index_list[c_i_index]} with distance {mahalanobis_distance} to {index_list[c_n_index]}')
+        elif mahalanobis_distance > FAR_MAHALANOBIS_THRESHOLD:
             # Skip further candidates if distance is too large
             c_i_index += 2
 
@@ -393,15 +398,18 @@ def q_7_5_6(marginals, result_without_closure, pose_graph_without_closure):
     plt.show()
 
 
-def find_loops(pose_graph: PoseGraph):
+# def find_loops(pose_graph: PoseGraph):
+def find_loops(data):
     """
     Detect and insert loop closures into the pose graph.
 
     :param data: Tuple containing pose graph and result.
     :return: Updated pose graph and result with loop closures.
     """
-    pg = pose_graph.graph
-    result = pose_graph.result
+    # pg = pose_graph.graph
+    # result = pose_graph.result
+    pg = data[0]
+    result = data[1]
     if result is None:
         raise ValueError('No result found in the pose graph.')
     marginals = gtsam.Marginals(pg, result)
@@ -447,9 +455,10 @@ def find_loops(pose_graph: PoseGraph):
                         break
                 familiar_path = False
                 frames_in_familiar_path = []
-    pose_graph.graph = pg
-    pose_graph.result = result
-    return pose_graph
+    # pose_graph.graph = pg
+    # pose_graph.result = result
+    # return pose_graph
+    return pg, result
 
 
 def plot_graph_along(camera_number, pose_graph, result):
@@ -713,17 +722,19 @@ def get_relative_pose_and_cov(first_frame_idx, second_frame_idx, bundle_graph, r
     # Create a new bundle graph and initial estimates for the two frames
     graph, initial_estimate = create_bundle(first_frame_idx, second_frame_idx, bundle_graph, result, inliers, db)
 
+    graph, new_res = optimize_graph(graph, initial_estimate)
+
     # Optimize the factor graph using Levenberg-Marquardt optimizer
-    optimizer = gtsam.LevenbergMarquardtOptimizer(graph, initial_estimate)
-    result = optimizer.optimize()
+    # optimizer = gtsam.LevenbergMarquardtOptimizer(graph, initial_estimate)
+    # result = optimizer.optimize()
 
     # Generate symbols for the camera frames
     first_frame_symbol = gtsam.symbol(CAMERA_SYMBOL, first_frame_idx)
     second_frame_symbol = gtsam.symbol(CAMERA_SYMBOL, second_frame_idx)
 
     # Extract the optimized poses for both frames
-    first_pose = result.atPose3(first_frame_symbol)
-    second_pose = result.atPose3(second_frame_symbol)
+    first_pose = new_res.atPose3(first_frame_symbol)
+    second_pose = new_res.atPose3(second_frame_symbol)
 
     # Compute the relative pose between the two frames
     relative_pose = first_pose.between(second_pose)
@@ -734,7 +745,7 @@ def get_relative_pose_and_cov(first_frame_idx, second_frame_idx, bundle_graph, r
     keys.append(second_frame_symbol)
 
     # Compute marginals to obtain covariance information
-    marginals = gtsam.Marginals(graph, result)
+    marginals = gtsam.Marginals(graph, new_res)
     information = marginals.jointMarginalInformation(keys).fullMatrix()
 
     # Extract the relative covariance matrix from the information matrix
@@ -758,6 +769,7 @@ def consensus_matches(reference_key_frame, candidates_index_lst, data_base: Trac
     # Iterate through candidates to find one with sufficient inliers
     for candidate in candidates_index_lst:
         matches = check_candidate_match(reference_key_frame, candidate, data_base)
+        print(f"cand: {candidate}, matches: {len(matches)}")
         if len(matches) > INLIERS_THRESHOLD:
             best_candidate = candidate
             best_matches = matches
@@ -971,7 +983,8 @@ def q_7_5_5(result, result_without_closure):
     plt.title("location error without loop closure")
 
 
-def plot_pose_graphs_XZ_ground_truth(results_with_closure, results_without_closure, pose_graph_closure, pose_graph_no_closure):
+def plot_pose_graphs_XZ_ground_truth(results_with_closure, results_without_closure, pose_graph_closure,
+                                     pose_graph_no_closure):
     """
     Plot the XZ plane of pose graphs with and without loop closures alongside ground truth.
 
@@ -1109,27 +1122,33 @@ def q_7_5(pose_graph, result, data):
 
 # init_dijksra_graph_relative_covariance_dict(data_list[1], data_list[0], relative_covariance_dict,
 #                                             cov_dijkstra_graph)
-# if __name__ == '__main__':
-#     # Load the initial pose graph and result from a serialized file
-#     path = arguments.DATA_HEAD + '/docs/pose_graph_result'
-#     data_list = load(path)
-#
-#     # Initialize the relative covariance dictionary and Dijkstra graph
-#     init_dijksra_graph_relative_covariance_dict(data_list[1], data_list[0], relative_covariance_dict,
-#                                                 cov_dijkstra_graph)
-#
-#     pg, res = find_loops(data_list)
-#     save((pg, res, relative_covariance_dict, cov_dijkstra_graph), "updated_pose_graph_results")
-#
-#     # Load the updated pose graph results with loop closures
-#     # pg, res, relative_covariance_dict, cov_dijkstra_graph = load("updated_pose_graph_results")
-#
-#     # Perform analysis and plotting on the pose graph
-#     data_list = load(path)
-#     q_7_5(pg, res, data_list)
-#
-#     # Plot the final updated pose graph trajectory
-#     plot_trajectory(0, res, title="updated pose graph", scale=1)
-#
-#     # Display all plots
-#     plt.show()
+if __name__ == '__main__':
+    # Load the initial pose graph and result from a serialized file
+    path = arguments.DATA_HEAD + '/docs/pose_graph_result'
+    # data_list = load(path)
+
+    pose_grpah_object = PoseGraph.load("/Users/mac/67604-SLAM-video-navigation/final_project/sift_p_graph")
+
+    # Initialize the relative covariance dictionary and Dijkstra graph
+    data_list = [pose_grpah_object.graph, pose_grpah_object.result]
+
+    init_dijksra_graph_relative_covariance_dict(data_list[1], data_list[0], relative_covariance_dict,
+                                                cov_dijkstra_graph)
+    pg, res = find_loops(data_list)
+    pose_grpah_object.graph = pg
+    pose_grpah_object.result = res
+    pose_grpah_object.save("/Users/mac/67604-SLAM-video-navigation/final_project/sift_p_graph_with_LC")
+    # save((pg, res, relative_covariance_dict, cov_dijkstra_graph), "updated_pose_graph_results")
+
+    # Load the updated pose graph results with loop closures
+    # pg, res, relative_covariance_dict, cov_dijkstra_graph = load("updated_pose_graph_results")
+
+    # Perform analysis and plotting on the pose graph
+    data_list = load(path)
+    q_7_5(pg, res, data_list)
+
+    # Plot the final updated pose graph trajectory
+    plot_trajectory(0, res, title="updated pose graph", scale=1)
+
+    # Display all plots
+    plt.show()

@@ -9,7 +9,7 @@ from final_project import arguments
 from final_project.algorithms.triangulation import linear_least_squares_triangulation
 from final_project.backend.GTSam.pose_graph import PoseGraph
 from final_project.backend.database.tracking_database import TrackingDB
-from final_project.backend.GTSam.gtsam_utils import get_factor_symbols,calculate_global_transformation
+from final_project.backend.GTSam.gtsam_utils import get_factor_symbols,calculate_global_transformation, save
 from final_project.backend.GTSam.bundle import K_OBJECT, get_keyframes, create_single_bundle, optimize_graph
 from final_project.backend.GTSam.gtsam_utils import load
 
@@ -567,8 +567,10 @@ if __name__ == '__main__':
     serialized_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/SIFT/db/db_3359"
     # bundles_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/bundles_AKAZE"
     db.load(serialized_path)
+    print(f"len keyframes: {len(get_keyframes(db))}")
     plt.show()
     key_frames = get_keyframes(db)
+
     all_bundles = []
     pose_graph = PoseGraph()
     for key_frame in key_frames:
@@ -582,9 +584,11 @@ if __name__ == '__main__':
         all_bundles.append(bundle_dict)
         pose_graph.add_bundle(bundle_dict)
         print(f"Bundle {key_frame} added to the pose graph")
-    bundles = load_bundles_list("/Users/mac/67604-SLAM-video-navigation/final_project/SIFT_BUNDLES")
 
     result = pose_graph.optimize()
+    pose_graph.save("/Users/mac/67604-SLAM-video-navigation/final_project/sift_p_graph")
+    bundles = load_bundles_list("/Users/mac/67604-SLAM-video-navigation/final_project/SIFT_BUNDLES")
+
     initial_estimate = pose_graph.initial_estimate
 
     print("done optimizing")

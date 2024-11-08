@@ -15,7 +15,7 @@ from final_project.analysis import run_analysis
 from final_project.backend.GTSam import bundle
 from final_project.backend.GTSam.pose_graph import PoseGraph
 from final_project.backend.database.tracking_database import TrackingDB
-from final_project.utils import LEN_DATA_SET
+from final_project.arguments import LEN_DATA_SET
 from final_project.backend.database.database import run
 from final_project.backend.GTSam.bundle import create_single_bundle, optimize_graph
 
