@@ -21,7 +21,7 @@ BASE_LINE_SIGN = -1
 DATA_PATH = arguments.DATA_PATH
 LEN_DATA_SET = len(os.listdir(DATA_PATH + 'image_0'))
 TRANSFORMATIONS_PATH = 'transformations_ex3.npy'
-POSE_SIGMA = gtsam.noiseModel.Diagonal.Sigmas(np.array([0.01, 0.01, 0.01, 0.01, 0.01, 0.01]))
+POSE_SIGMA = gtsam.noiseModel.Diagonal.Sigmas(np.array([1, 1, 1, 1, 1, 1])*1)
 K_OBJECT = gtsam.Cal3_S2Stereo(K[0, 0], K[1, 1], K[0, 1], K[0, 2], K[1, 2], BASE_LINE_SIGN * M2[0, 3])
 
 
@@ -205,21 +205,29 @@ def optimize_graph(graph, initial):
 
 def calc_locations_angle(t1, t2):
     """ Calculate the angle between two cameras in the x-y plane for keyframe selection"""
-    cam1_rotation = t1[:3, :3]
-    cam1_translation = t1[:3, 3]
-    cam1_position = -cam1_rotation.T @ cam1_translation
-    cam1_position = cam1_position[:2]
-
-    cam2_rotation = t2[:3, :3]
-    cam2_translation = t2[:3, 3]
-    cam2_position = -cam2_rotation.T @ cam2_translation
-    cam2_position = cam2_position[:2]
-    x = max(np.abs(cam2_position[1] - cam1_position[1]), np.abs(cam2_position[0] - cam1_position[0]))
-    y = min(np.abs(cam2_position[1] - cam1_position[1]), np.abs(cam2_position[0] - cam1_position[0]))
-    angle = np.arctan2(y, x)
+    # cam1_rotation = t1[:3, :3]
+    # cam1_translation = t1[:3, 3]
+    # cam1_position = -cam1_rotation.T @ cam1_translation
+    # cam1_position = cam1_position[:2]
+    #
+    # cam2_rotation = t2[:3, :3]
+    # cam2_translation = t2[:3, 3]
+    # cam2_position = -cam2_rotation.T @ cam2_translation
+    # cam2_position = cam2_position[:2]
+    # x = max(np.abs(cam2_position[1] - cam1_position[1]), np.abs(cam2_position[0] - cam1_position[0]))
+    # y = min(np.abs(cam2_position[1] - cam1_position[1]), np.abs(cam2_position[0] - cam1_position[0]))
+    # angle = np.arctan2(y, x)
     # angle = np.arctan2(np.abs(cam2_position[1] - cam1_position[1]), np.abs(cam2_position[0] - cam1_position[0]))
+    if t1.shape[0] != t1.shape[1]:
+        t1 = np.vstack((t1, np.array([0, 0, 0, 1])))
+    if t2.shape[0] != t2.shape[1]:
+        t2 = np.vstack((t2, np.array([0, 0, 0, 1])))
+
+    R = cv2.Rodrigues(t1[:3, :3] @ t2[:3, :3].T)[0]
+    angle = np.linalg.norm(R)*180/np.pi
 
     return angle
+
 
 
 # TODO: CHECK THIS FUNCTION! IF IT IS WORKING CORRECTLY
@@ -231,7 +239,7 @@ def extract_keyframes(db: TrackingDB, transformations):
     i = 0
     minimum_gap = 5
     max_dist = 5.0
-    track_losing_factor = 0.3
+    track_losing_factor = 0.1
     max_gap = 25
 
     theta_max = 20
@@ -250,12 +258,12 @@ def extract_keyframes(db: TrackingDB, transformations):
             common_tracks = old_tracks.intersection(new_tracks)
             tracks_ratio = len(common_tracks) / len(old_tracks)
             old_tracks = new_tracks
-            accumalate_angle = (np.abs(calc_locations_angle(t_initial, t2)) * 180 / np.pi)
+            angle = calc_locations_angle(t_initial, t2)
             t1 = t2
             # print(f"angle {accumalate_angle} dist {dist} common tracks {len(common_tracks)}, frame {j}, i {i}")
 
             if tracks_ratio < track_losing_factor or j == i + max_gap - 1 \
-                    or j == num_frames - 1 or dist > max_dist or accumalate_angle > theta_max:
+                    or j == num_frames - 1 or dist > max_dist or angle > theta_max:
                 keyFrames.append((i, j))
                 i = j
                 break
@@ -264,7 +272,7 @@ def extract_keyframes(db: TrackingDB, transformations):
         if j == min(i + max_gap - 1, num_frames - 1):
             i = j + 1
 
-    # print(f"key frames {keyFrames}")
+    print(f"key frames {keyFrames}")
 
     return keyFrames
 

@@ -18,4 +18,4 @@ DATA_HEAD = DATA_HEAD_MAC
 LEN_DATA_SET = len(os.listdir(DATA_PATH + 'image_0'))
 AKAZE_PATH = DATA_HEAD + "/docs/AKAZE"
 SIFT_PATH = DATA_HEAD + "/docs/SIFT"
-GROUND_TRUTH_PATH = DATA_PATH + "/dataset/poses/00.txt"
+GROUND_TRUTH_PATH = DATA_HEAD + "/dataset/poses/00.txt"

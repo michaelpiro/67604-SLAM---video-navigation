@@ -52,7 +52,7 @@ def create_pose_graph(all_bundles):
     initial_estimate = gtsam.Values()
 
     # graph_scale_factor is for the graph visualization
-    graph_scale_factor = 0.01
+    graph_scale_factor = 0.1
 
     # Iterate through all bundles
     last_pose = None
@@ -128,9 +128,10 @@ class PoseGraph:
         self.initial_estimate = gtsam.Values()
         self.last_pose = None
         self.key_frames = []
-        self.graph_scale_factor = 0.01
+        self.graph_scale_factor = 1.0
         self.first_frame_cov = gtsam.noiseModel.Diagonal.Sigmas(
             np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0]) * self.graph_scale_factor)
+        self.result = None
 
     def add_bundle(self, bundle):
         cameras_dict = bundle['cameras_dict']
@@ -158,7 +159,8 @@ class PoseGraph:
         except Exception as e:
             print(f"Error in calculating the relative covariance {e}")
 
-        relative_cov = np.linalg.inv(information[-6:, -6:]) * self.graph_scale_factor
+        # relative_cov = np.linalg.inv(information[-6:, -6:]) * self.graph_scale_factor
+        relative_cov = np.linalg.inv(information[-6:, -6:])
 
         noise_model = gtsam.noiseModel.Gaussian.Covariance(relative_cov)
 
@@ -182,7 +184,8 @@ class PoseGraph:
     def optimize(self):
         optimizer = gtsam.LevenbergMarquardtOptimizer(self.graph, self.initial_estimate)
         result = optimizer.optimize()
-        return result
+        self.result = result
+        return self.result
 
     def save(self, filename):
         with open(filename, 'wb') as file:
@@ -203,30 +206,30 @@ class PoseGraph:
         plot.plot_trajectory(3, result, marginals=marg, scale=1)
 
 
-if __name__ == '__main__':
-    # bad_symbol = 7782220156096381283
-    # bad_point = [-35739.59870324, - 6466.9188695, 101653.48581696]
-    # x = (1164, 1169)
-    # load the database
-    db = TrackingDB()
-    serialized_path = "/Users/mac/67604-SLAM-video-navigation/final_project/SIFT_DB"
-    # serialized_path = arguments.DATA_HEAD + "/docs/db/AKAZE/db_3359"
-    db.load(serialized_path)
-
-    key_frames = bundle.get_keyframes(db)
-    pose_graph = PoseGraph()
-    all_bundles = []
-    for key_frame in key_frames:
-        first_frame = key_frame[0]
-        last_frame = key_frame[1]
-        graph, initial, cameras_dict, frames_dict = bundle.create_single_bundle(key_frame[0], key_frame[1], db)
-        graph, result = bundle.optimize_graph(graph, initial)
-        # print(f"bad point {result.atPoint3(bad_symbol)}")
-
-        bundle_dict = {'graph': graph, 'initial': initial, 'cameras_dict': cameras_dict, 'frames_dict': frames_dict,
-                       'result': result, 'keyframes': key_frame}
-        all_bundles.append(bundle_dict)
-        pose_graph.add_bundle(bundle_dict)
-        print(f"Bundle {key_frame} added to the pose graph")
-    save(all_bundles,"/Users/mac/67604-SLAM-video-navigation/final_project/SIFT_BUNDLES")
-    pose_graph.optimize()
+# if __name__ == '__main__':
+#     # bad_symbol = 7782220156096381283
+#     # bad_point = [-35739.59870324, - 6466.9188695, 101653.48581696]
+#     # x = (1164, 1169)
+#     # load the database
+#     db = TrackingDB()
+#     serialized_path = "/Users/mac/67604-SLAM-video-navigation/final_project/SIFT_DB"
+#     # serialized_path = arguments.DATA_HEAD + "/docs/db/AKAZE/db_3359"
+#     db.load(serialized_path)
+#
+#     key_frames = bundle.get_keyframes(db)
+#     pose_graph = PoseGraph()
+#     all_bundles = []
+#     for key_frame in key_frames:
+#         first_frame = key_frame[0]
+#         last_frame = key_frame[1]
+#         graph, initial, cameras_dict, frames_dict = bundle.create_single_bundle(key_frame[0], key_frame[1], db)
+#         graph, result = bundle.optimize_graph(graph, initial)
+#         # print(f"bad point {result.atPoint3(bad_symbol)}")
+#
+#         bundle_dict = {'graph': graph, 'initial': initial, 'cameras_dict': cameras_dict, 'frames_dict': frames_dict,
+#                        'result': result, 'keyframes': key_frame}
+#         all_bundles.append(bundle_dict)
+#         pose_graph.add_bundle(bundle_dict)
+#         print(f"Bundle {key_frame} added to the pose graph")
+#     save(all_bundles,"/Users/mac/67604-SLAM-video-navigation/final_project/SIFT_BUNDLES")
+#     pose_graph.optimize()

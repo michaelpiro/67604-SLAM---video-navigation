@@ -7,12 +7,15 @@ from matplotlib import pyplot as plt
 
 from final_project import arguments
 from final_project.algorithms.triangulation import linear_least_squares_triangulation
+from final_project.backend.GTSam.pose_graph import PoseGraph
 from final_project.backend.database.tracking_database import TrackingDB
-from final_project.backend.GTSam.gtsam_utils import get_factor_symbols
-from final_project.backend.GTSam.bundle import K_OBJECT, get_keyframes
+from final_project.backend.GTSam.gtsam_utils import get_factor_symbols,calculate_global_transformation
+from final_project.backend.GTSam.bundle import K_OBJECT, get_keyframes, create_single_bundle, optimize_graph
 from final_project.backend.GTSam.gtsam_utils import load
 
 import numpy as np
+
+from final_project.backend.loop.loop_closure import find_loops
 
 SUBSET_FACTOR = 0.005
 
@@ -428,6 +431,122 @@ def run_analysis(db, bundles_list):
 
     plt.show()
 
+
+import cv2
+import numpy as np
+
+from final_project.Inputs import read_extrinsic_matrices
+from final_project.arguments import LEN_DATA_SET
+from final_project.backend.GTSam.gtsam_utils import get_locations_from_gtsam
+from final_project.backend.database.tracking_database import TrackingDB
+from final_project.backend.GTSam.gtsam_utils import calculate_relative_transformation
+import matplotlib.pyplot as plt
+
+
+def calculate_camera_locations(camera_transformations):
+    loc = np.array([0, 0, 0])
+    for T in camera_transformations:
+        R = T[:, :3]
+        t = T[:, 3:]
+        loc = np.vstack((loc, (-R.transpose() @ t).reshape((3))))
+    return loc
+
+
+def plot_trajectory_over_all(db: TrackingDB, result, result_without_closure):
+    """
+    plot the trajectory over the whole dataset, with respect ot ground truth, PNP, bundle adjustment and
+    """
+    # Retrieve transformations and calculate locations
+    ground_truth_transformations = read_extrinsic_matrices(n=LEN_DATA_SET)
+    PNP_transformations = calculate_global_transformation(db, 1, LEN_DATA_SET)
+    pnp_transformations = np.array([PNP_transformations[i] for i in range(len(PNP_transformations))])
+    # Calculate trajectories
+    ground_truth_locations = calculate_camera_locations(ground_truth_transformations)
+    PNP_locations = calculate_camera_locations(pnp_transformations)
+    loop_closures_locations = get_locations_from_gtsam(result)
+    bundle_adjustment_locations = get_locations_from_gtsam(result_without_closure)
+
+    # Extract X and Z coordinates for each trajectory
+    gt_x, gt_z = zip(*[(loc[0], loc[2]) for loc in ground_truth_locations])
+    pnp_x, pnp_z = zip(*[(loc[0], loc[2]) for loc in PNP_locations])
+    lc_x, lc_z = zip(*[(loc[0], loc[2]) for loc in loop_closures_locations])
+    ba_x, ba_z = zip(*[(loc[0], loc[2]) for loc in bundle_adjustment_locations])
+
+    # Plotting
+    plt.figure(figsize=(10, 8))
+
+    # Plot each trajectory with a distinct color and label
+    plt.scatter(gt_x, gt_z, color='red', marker='o', label='Ground Truth', s=1)
+    plt.scatter(pnp_x, pnp_z, color='blue', marker='x', label='PNP Transformations',s=1)
+    plt.scatter(lc_x, lc_z, color='green', marker='^', label='Loop Closures', s=1)
+    plt.scatter(ba_x, ba_z, color='purple', marker='s', label='Bundle Adjustment', s=1)
+
+    # Add labels, title, legend, and grid
+    plt.xlabel('X Coordinate')
+    plt.ylabel('Z Coordinate')
+    plt.title('Relative Position of the Four Cameras (Top-Down View)')
+    plt.legend(loc='upper right')  # Add legend for different trajectories
+    plt.grid(True)
+    plt.axis('equal')  # Ensure the aspect ratio is equal
+
+    plt.show()
+
+
+def calculate_error_deg(estimated_Transformations, ground_truth_transformations):
+    """
+    calculate the error of the degrees(between estimations and ground truth)
+    :param estimated_Transformations: estimated transformations
+    :param ground_truth_transformations: ground truth transformations
+    """
+    assert len(estimated_Transformations) == len(ground_truth_transformations)
+    errors = []
+    for Ra, Rb in zip(estimated_Transformations, ground_truth_transformations):
+        Ra = Ra[:, :3]
+        Rb = Rb[:, :3]
+        R = Ra.T @ Rb
+        rvec, _ = cv2.Rodrigues(R)
+        error = np.linalg.norm(rvec) * 180 / np.pi
+        errors.append(error)
+    return errors
+
+
+def Absolute_PnP_estimation_error(db: TrackingDB):
+    """
+    absolute PNP estimation error, includes x,y,z, and deg errors
+    """
+    # Retrieve transformations and calculate locations
+    ground_truth_transformations = read_extrinsic_matrices(n=LEN_DATA_SET)
+    PNP_transformations = calculate_relative_transformation(db, 1, LEN_DATA_SET)
+
+    # Calculate trajectories
+    ground_truth_locations = calculate_camera_locations(ground_truth_transformations)
+    PNP_locations = calculate_camera_locations(PNP_transformations)
+    # Extract X and Z coordinates for each trajectory
+    gt_x, gt_y, gt_z = zip(*[(loc[0], loc[1], loc[2]) for loc in ground_truth_locations])
+    pnp_x, pnp_y, pnp_z = zip(*[(loc[0], loc[1], loc[2]) for loc in PNP_locations])
+    #X axis error, Y axis error, Z axis error, Total location error norm (m)
+    X_error = np.linalg.norm(pnp_x - gt_x)
+    Y_error = np.linalg.norm(pnp_y - gt_y)
+    Z_error = np.linalg.norm(pnp_z - gt_z)
+    norm_error = np.linalg.norm(np.array(ground_truth_locations) - np.array(PNP_locations))
+    #Angle error (deg)
+    angle_errors = calculate_error_deg(PNP_transformations, ground_truth_transformations)
+
+    # Plotting
+    errors = [X_error, Y_error, Z_error, norm_error, angle_errors]
+    error_labels = ['X Error (m)', 'Y Error (m)', 'Z Error (m)', 'Total Location Error Norm (m)', 'Angle Error (deg)']
+
+    plt.figure(figsize=(10, 6))
+    plt.bar(error_labels, errors, color=['blue', 'green', 'red', 'purple', 'orange'])
+
+    # Adding labels and title
+    plt.ylabel('Error Magnitude')
+    plt.title('Absolute PnP Estimation Errors')
+    plt.grid(True, axis='y', linestyle='--', alpha=0.7)
+
+    # Show plot
+    plt.show()
+
 def load_bundles_list(base_filename):
     """ load TrackingDB to base_filename+'.pkl' file. """
     filename = base_filename + '.pkl'
@@ -438,6 +557,9 @@ def load_bundles_list(base_filename):
     print('Bundles loaded from', filename)
     return bundles
 
+
+
+
 if __name__ == '__main__':
     db = TrackingDB()
     # serialized_path = arguments.DATA_HEAD + "/docs/AKAZE/db/db_3359"
@@ -447,7 +569,31 @@ if __name__ == '__main__':
     db.load(serialized_path)
     plt.show()
     key_frames = get_keyframes(db)
+    all_bundles = []
+    pose_graph = PoseGraph()
+    for key_frame in key_frames:
+        first_frame = key_frame[0]
+        last_frame = key_frame[1]
+        graph, initial, cameras_dict, frames_dict = create_single_bundle(key_frame[0], key_frame[1], db)
+        graph, result = optimize_graph(graph, initial)
+
+        bundle_dict = {'graph': graph, 'initial': initial, 'cameras_dict': cameras_dict, 'frames_dict': frames_dict,
+                       'result': result, 'keyframes': key_frame}
+        all_bundles.append(bundle_dict)
+        pose_graph.add_bundle(bundle_dict)
+        print(f"Bundle {key_frame} added to the pose graph")
     bundles = load_bundles_list("/Users/mac/67604-SLAM-video-navigation/final_project/SIFT_BUNDLES")
+
+    result = pose_graph.optimize()
+    initial_estimate = pose_graph.initial_estimate
+
+    print("done optimizing")
+    find_loops(pose_graph)
+    print("done finding loops")
+
+    plot_trajectory_over_all(db, result,initial_estimate)
+    Absolute_PnP_estimation_error(db)
+
     plot_reprojection_error_vs_track_length(db, bundles, key_frames)
     plt.show()
     # run_analysis(db, bundles)

@@ -5,6 +5,7 @@ import numpy as np
 import cv2
 
 from final_project.algorithms.triangulation import triangulate_last_frame
+from final_project.arguments import LEN_DATA_SET
 from final_project.backend.database.tracking_database import TrackingDB
 from final_project.utils import K, M1, M2, P, Q, rodriguez_to_mat
 
@@ -19,11 +20,11 @@ def load(base_filename):
     print('Bundles loaded from', filename)
     return bundles, graphs, results
 
-
-def calculate_relative_transformation(T_A, T_B):
-    """Calculate the relative transformation between two poses.
-    more specifically, how b is seen from a."""
-    return np.linalg.inv(T_A) @ T_B
+#
+# def calculate_relative_transformation(T_A, T_B):
+#     """Calculate the relative transformation between two poses.
+#     more specifically, how b is seen from a."""
+#     return np.linalg.inv(T_A) @ T_B
 
 
 def get_inverse(T):
@@ -87,36 +88,62 @@ def calculate_relative_transformation(db: TrackingDB, first_frame_idx, last_fram
     transformations[0] = np.vstack((M1, np.array([0, 0, 0, 1])))
     diff_coeff = np.zeros((5, 1))
     for i in range(1, last_frame_idx - first_frame_idx + 1):
-        current_frame_id = i
-        prev_frame_id = current_frame_id - 1
-        last_frame_transform = transformations[prev_frame_id]
-
-        # get the relevant tracks
-        common_tracks = list(set(db.tracks(current_frame_id)).intersection(
-            set(db.tracks(prev_frame_id))))
-        links_last_frame = [db.link(prev_frame_id, track_id) for track_id in common_tracks]
-        links_first_frame = [db.link(current_frame_id, track_id) for track_id in common_tracks]
-
-        # calculate the transformation between the two frames
-        # traingulate the links
-        triangulated_links = triangulate_last_frame(db, P, Q, links_last_frame)
-        if len(triangulated_links) < 4:
-            raise Exception("Not enough points to triangulate and perform PnP")
-        # calculate the transformation
-
-        links_first_frame = np.array(links_first_frame)
-        img_points = np.array([(link.x_left, link.y) for link in links_first_frame])
-        # links_current_frame = np.array(links_current_frame)
-        success, rotation_vector, translation_vector = cv2.solvePnP(triangulated_links, img_points, K,
-                                                                    distCoeffs=diff_coeff, flags=cv2.SOLVEPNP_EPNP)
-
-        inv_t = rodriguez_to_mat(rotation_vector, translation_vector) if success else None
-        if inv_t is None:
+        T = calc_rel_T(db, i)
+        if T is None:
             raise Exception("PnP failed")
-        new_trans = get_inverse(inv_t)
-        transformations[current_frame_id] = get_inverse(new_trans @ last_frame_transform)
-
+        new_trans = get_inverse(T)
+        transformations[i] = get_inverse(new_trans @ transformations[i - 1])
     return transformations
+
+
+
+def calc_rel_T(db: TrackingDB, frame):
+    """Calculate the realtive transformations between the first and every frame between
+        the first and the last frame."""
+
+    if frame == 0:
+        return M1
+
+    diff_coeff = np.zeros((5, 1))
+    current_frame_id = frame
+    prev_frame_id = current_frame_id - 1
+
+    # get the relevant tracks
+    common_tracks = list(set(db.tracks(current_frame_id)).intersection(
+        set(db.tracks(prev_frame_id))))
+    links_last_frame = [db.link(prev_frame_id, track_id) for track_id in common_tracks]
+    links_first_frame = [db.link(current_frame_id, track_id) for track_id in common_tracks]
+
+    # calculate the transformation between the two frames
+    # traingulate the links
+    triangulated_links = triangulate_last_frame(db, P, Q, links_last_frame)
+    if len(triangulated_links) < 4:
+        raise Exception("Not enough points to triangulate and perform PnP")
+    # calculate the transformation
+
+    links_first_frame = np.array(links_first_frame)
+    img_points = np.array([(link.x_left, link.y) for link in links_first_frame])
+    # links_current_frame = np.array(links_current_frame)
+    success, rotation_vector, translation_vector = cv2.solvePnP(triangulated_links, img_points, K,
+                                                                distCoeffs=diff_coeff, flags=cv2.SOLVEPNP_EPNP)
+
+    T = rodriguez_to_mat(rotation_vector, translation_vector) if success else None
+    if T is None:
+        raise Exception("PnP failed")
+    return T
+
+
+def calculate_global_transformation(db: TrackingDB, first_frame_idx, last_frame_idx):
+    """Calculate the global transformation between the first and the last frame."""
+    # transformations = calculate_relative_transformation(db, first_frame_idx, last_frame_idx)
+    rel_T = []
+    for i in range(LEN_DATA_SET):
+        T = calc_rel_T(db, i)
+        if i == 0:
+            rel_T.append(T)
+        else:
+            rel_T.append(T @ np.vstack((rel_T[-1], np.array([0, 0, 0, 1]))))
+    return rel_T
 
 
 def get_index_list(result):
