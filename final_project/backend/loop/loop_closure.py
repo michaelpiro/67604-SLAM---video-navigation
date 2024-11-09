@@ -70,7 +70,7 @@ def get_tracking_database(path_do_db_file=PATH_TO_DB):
 
 
 # Load the tracking database
-# db = get_tracking_database(PATH_TO_DB)
+db = get_tracking_database(PATH_TO_DB)
 
 
 # from ex4_v2 import calc_ransac_iteration, triangulate_links, get_pixels_from_links, P, Q
@@ -491,14 +491,21 @@ def insert_to_pose_graph(camera_number, best_candidate, matches, pose_graph, res
     """
     # Compute relative pose and covariance between the two frames
     # try:
-    rel_pose, rel_cov = get_relative_pose_and_cov(camera_number, best_candidate, pose_graph, result, matches, db)
+    rel_pose_new, rel_cov_new = get_relative_pose_and_cov(camera_number, best_candidate, pose_graph, result, matches, db)
+
+    index_list = get_index_list(result)
+    old_camera_index = index_list.index(camera_number)
+    camera_before = index_list[old_camera_index - 1]
+    rel_pose_old, rel_cov_old = get_relative_pose_and_cov(camera_before, camera_number, pose_graph, result, matches, db)
+
+
     # except Exception as e:
     #     print(f"bad point!!!!!!!!!!!!!!!! {result.atPoint3(7782220156096217146)}")
     #     return pose_graph, result
 
 
     # Add the relative pose to the pose graph and optimize
-    pose_graph, result = update_pose_graph(pose_graph, result, rel_pose, rel_cov, camera_number, best_candidate)
+    pose_graph, result = update_pose_graph(pose_graph, result, rel_pose_new, rel_cov_new, camera_number, best_candidate)
 
     # Plot the updated graph
     # plot_graph_along(camera_number, pose_graph, result)

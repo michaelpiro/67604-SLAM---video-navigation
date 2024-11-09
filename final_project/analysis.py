@@ -16,8 +16,10 @@ from final_project.backend.GTSam.gtsam_utils import load
 
 import numpy as np
 
+from final_project.backend.loop.graph import Graph
 from final_project.backend.loop.loop_closure import find_loops, get_locations_ground_truths, \
-    plot_trajectory2D_ground_truth
+    plot_trajectory2D_ground_truth, init_dijksra_graph_relative_covariance_dict, get_relative_covariance, \
+    cov_dijkstra_graph
 
 SUBSET_FACTOR = 0.005
 
@@ -381,58 +383,6 @@ def plot_reprojection_error_vs_track_length(tracking_db: TrackingDB, bundles, ke
     plot_reprojection_errors(distance_dict)
 
 
-def run_analysis(bundles_list):
-    db = TrackingDB().load(SIFT_DB_PATH)
-    bundles_list = load_bundles_list()
-
-    total_tracks = total_number_of_tracks(db)
-    num_frames = number_of_frames(db)
-    mean_length = mean_track_length(db)
-    max_length = max_track_length(db)
-    min_length = min_track_length(db)
-    mean_frame_links = mean_number_of_frame_links(db)
-
-    print(f"Total number of tracks: {total_tracks}")
-    print(f"Total number of frames: {num_frames}")
-    print(f"Mean track length: {mean_length}, Max track length: {max_length}, Min track length: {min_length}")
-    print(f"Mean number of frame links: {mean_frame_links}")
-
-    # Compute outgoing tracks
-    outgoing_tracks = compute_outgoing_tracks(db)
-
-    # Plot the connectivity graph
-    plot_connectivity_graph(outgoing_tracks)
-
-    # Compute matches count
-    matches_count = compute_matches_count(db)
-
-    # Plot the matches count graph
-    plot_matches_count_graph(matches_count)
-
-    # Plot the inliers percentage graph
-    plot_inliers_percentage_graph(db.frameID_to_inliers_percent)
-
-    # Calculate track lengths
-    track_lengths = calculate_track_lengths(db)
-
-    # Plot the track length histogram
-    plot_track_length_histogram(track_lengths)
-
-    # Plot the reprojection error vs track length
-    plot_reprojection_error_vs_track_length(db)
-
-    # Plot mean factor error
-    plot_mean_factor_error(bundles_list)
-
-    # Plot median projection error
-    plot_median_projection_error(db, bundles_list)
-
-    # Plot trajectory overall
-    plot_trajectory_over_all(db, )
-
-    plt.show()
-
-
 import cv2
 import numpy as np
 
@@ -643,8 +593,6 @@ def absolute_pg(result, result_without_closure):
     plt.show()
 
 
-
-
 def calculate_norm_error(estimated_transformtions, ground_truth_transformations):
     """claculate the norm error of every transformation between estimated and ground truth"""
     # Calculate trajectories
@@ -734,6 +682,8 @@ def rel_pnp_seq_err(db):
         for i in range(LEN_DATA_SET - length):
             first_frame = i
             last_frame = i + length
+            if last_frame >= LEN_DATA_SET:
+                break
             x_axis.append(first_frame)
             dist_traveled += [accumulate_distance[last_frame] - accumulate_distance[first_frame]]
             gt_rel.append(T_B_from_T_A(gt[first_frame][:3, :], gt[last_frame][:3, :]))
@@ -745,6 +695,22 @@ def rel_pnp_seq_err(db):
         all_norm_err.append(pnp_norm_err)
         all_deg_err.append(pnp_deg_err)
 
+    # Print the average error and median of all the subsequence lengths
+    location_err_means = [np.mean(all_norm_err[i]) for i in range(len(sub_section_length))]
+    angles_err_means = [np.mean(all_deg_err[i]) for i in range(len(sub_section_length))]
+    location_err_medians = [np.median(all_norm_err[i]) for i in range(len(sub_section_length))]
+    angles_err_medians = [np.median(all_deg_err[i]) for i in range(len(sub_section_length))]
+    print("\nResults for relative PnP sequence error")
+    for i in range(len(sub_section_length)):
+        print(f"Mean of norm error for subsequence length {sub_section_length[i]} is {location_err_means[i]}, PnP")
+        print(f"Mean of angle error for subsequence length {sub_section_length[i]} is {angles_err_means[i]}, PnP")
+        print(f"Median of norm error for subsequence length {sub_section_length[i]} is {location_err_medians[i]}, PnP")
+        print(f"Median of angle error for subsequence length {sub_section_length[i]} is {angles_err_medians[i]}, PnP")
+
+    over_all_location_err_mean = np.mean(np.array(location_err_means))
+    print(f"Overall mean of norm error is {over_all_location_err_mean}, PnP")
+    over_all_angle_err_mean = np.mean(np.array(angles_err_means))
+    print(f"Overall mean of angle error is {over_all_angle_err_mean}, PnP")
     # Plotting
     plt.figure(figsize=(10, 6))
     errors = all_norm_err
@@ -753,6 +719,8 @@ def rel_pnp_seq_err(db):
 
     for i in range(len(errors)):
         plt.plot(all_x_axis[i], errors[i], color=colors[i], label=error_labels[i])
+    plt.plot(all_x_axis[0], [over_all_location_err_mean] * len(all_x_axis[0]), color='black',
+             label='Mean location error', linestyle='-.')
 
     # Adding labels and title
     plt.ylabel('Norm Error Magnitude')
@@ -766,12 +734,16 @@ def rel_pnp_seq_err(db):
 
     for i in range(len(errors)):
         plt.plot(all_x_axis[i], errors[i], color=colors[i], label=error_labels[i])
+    plt.plot(all_x_axis[0], [over_all_angle_err_mean] * len(all_x_axis[0]), color='black',
+             label='Mean angle error', linestyle='-.')
 
     # Adding labels and title
     plt.ylabel('Error in degrees')
     plt.title('Relative pose estimation angle error as a function of subsequence length, PNP')
     plt.grid(True, axis='y', linestyle='--', alpha=0.7)
+    plt.ylim(0, 1.5)
     plt.legend()
+
 
 def get_closest_keyframe_index(key_frame_list, frame_index):
     """
@@ -779,6 +751,7 @@ def get_closest_keyframe_index(key_frame_list, frame_index):
     """
     closest_index = min(key_frame_list, key=lambda x: abs(x - frame_index))
     return closest_index
+
 
 def calculate_bundles_global_transformation(bundles_list: List):
     """Calculate the global transformation of every keyframe in the bundles list"""
@@ -806,72 +779,213 @@ def calculate_bundles_global_transformation(bundles_list: List):
     return global_transformations
 
 
-
-def rel_bundle_seq_err(bundles: Dict):
+def rel_bundle_seq_err(bundles: Dict, pose_graph_lc, pose_graph_no_lc):
     sub_section_length = [100, 400, 800]
     gt = read_extrinsic_matrices(GROUND_TRUTH_PATH, LEN_DATA_SET)
     bundles_list = [bundles[i] for i in range(len(bundles))]
     accumulate_distance = calculate_dist_traveled(gt)
     all_key_frames_list = [0] + [bundle["keyframes"][-1] for bundle in bundles_list]
     global_bundle_transformation = calculate_bundles_global_transformation(bundles_list)
-    all_norm_err = list()
-    all_deg_err = list()
+    all_norm_err_bundle = list()
+    all_deg_err_bundle = list()
+    all_norm_err_lc = list()
+    all_deg_err_lc = list()
+    all_norm_err_no_lc = list()
+    all_deg_err_no_lc = list()
     all_x_axis = list()
-    for j, length in enumerate(sub_section_length):
+    for length in sub_section_length:
         gt_rel = list()
         bundle_rel = list()
+        lc_rel = list()
+        no_lc_rel = list()
         x_axis = list()
         dist_traveled = []
-        for i,bundle in enumerate(bundles_list):
-            result = bundle["result"]
+        for i, bundle in enumerate(bundles_list):
             key_frames = bundle["keyframes"]
             first_frame = key_frames[0]
             last_frame = key_frames[-1]
+            if first_frame + length > LEN_DATA_SET:
+                break
             x_axis.append(first_frame)
-            closest_key_frame = get_closest_keyframe_index(all_key_frames_list, first_frame+length)
+            closest_key_frame = get_closest_keyframe_index(all_key_frames_list, first_frame + length)
             closest_kf_index = all_key_frames_list.index(closest_key_frame)
-
             dist_traveled += [accumulate_distance[closest_key_frame] - accumulate_distance[first_frame]]
             T_a = global_bundle_transformation[i]
             T_b = global_bundle_transformation[closest_kf_index]
+
+            first_pose_lc = pose_graph_lc.atPose3(gtsam.symbol("c", first_frame))
+            last_pose_lc = pose_graph_lc.atPose3(gtsam.symbol("c", closest_key_frame))
+            est_rel_pose_lc = T_B_from_T_A(gtsam_pose_to_T(first_pose_lc), gtsam_pose_to_T(last_pose_lc))
+
+            first_pose_no_lc = pose_graph_no_lc.atPose3(gtsam.symbol("c", first_frame))
+            last_pose_no_lc = pose_graph_no_lc.atPose3(gtsam.symbol("c", closest_key_frame))
+            est_rel_pose_no_lc = T_B_from_T_A(gtsam_pose_to_T(first_pose_no_lc), gtsam_pose_to_T(last_pose_no_lc))
+
             estimated_T = T_B_from_T_A(T_a, T_b)
+
+            lc_rel.append(est_rel_pose_lc)
+            no_lc_rel.append(est_rel_pose_no_lc)
             bundle_rel.append(estimated_T)
             gt_rel.append(T_B_from_T_A(gt[first_frame], gt[closest_key_frame]))
 
         dist_traveled = np.array(dist_traveled)
         bundle_norm_err = calculate_norm_error(bundle_rel, gt_rel) / dist_traveled
         bundle_deg_err = calculate_error_deg(bundle_rel, gt_rel) / dist_traveled
+        lc_norm_err = calculate_norm_error(lc_rel, gt_rel) / dist_traveled
+        lc_deg_err = calculate_error_deg(lc_rel, gt_rel) / dist_traveled
+        no_lc_norm_err = calculate_norm_error(no_lc_rel, gt_rel) / dist_traveled
+        no_lc_deg_err = calculate_error_deg(no_lc_rel, gt_rel) / dist_traveled
         all_x_axis.append(x_axis)
-        all_norm_err.append(bundle_norm_err)
-        all_deg_err.append(bundle_deg_err)
+        all_norm_err_bundle.append(bundle_norm_err)
+        all_deg_err_bundle.append(bundle_deg_err)
+        all_norm_err_lc.append(lc_norm_err)
+        all_deg_err_lc.append(lc_deg_err)
+        all_norm_err_no_lc.append(no_lc_norm_err)
+        all_deg_err_no_lc.append(no_lc_deg_err)
+
+    # # Print the average error and median of all the subsequence lengths
+    # location_err_means = [np.mean(all_norm_err_bundle[i]) for i in range(len(sub_section_length))]
+    # angles_err_means = [np.mean(all_deg_err_bundle[i]) for i in range(len(sub_section_length))]
+    # location_err_medians = [np.median(all_norm_err_bundle[i]) for i in range(len(sub_section_length))]
+    # angles_err_medians = [np.median(all_deg_err_bundle[i]) for i in range(len(sub_section_length))]
+
+    # print("\nResults for relative bundle sequence error")
+    # for i in range(len(sub_section_length)):
+    #     print(
+    #         f"Mean of norm error for subsequence length {sub_section_length[i]} is {location_err_means[i]}, Bundle Adjusment")
+    #     print(
+    #         f"Mean of angle error for subsequence length {sub_section_length[i]} is {angles_err_means[i]}, Bundle Adjusment")
+    #     print(
+    #         f"Median of norm error for subsequence length {sub_section_length[i]} is {location_err_medians[i]}, Bundle Adjusment")
+    #     print(
+    #         f"Median of angle error for subsequence length {sub_section_length[i]} is {angles_err_medians[i]}, Bundle Adjusment")
+    #
+    # over_all_location_err_mean = np.mean(np.array(location_err_means))
+    # print(f"Overall mean of norm error is {over_all_location_err_mean}, Bundle Adjusment")
+    # over_all_angle_err_mean = np.mean(np.array(angles_err_means))
+    # print(f"Overall mean of angle error is {over_all_angle_err_mean}, Bundle Adjusment")
+
     # Plotting
 
-    plt.figure(figsize=(10, 6))
-    errors = all_norm_err
-    error_labels = [f'Bundles norm error of seq length {i}' for i in sub_section_length]
-    colors = ['blue', 'green', 'red', 'purple', 'orange']
+    all_errors = [all_norm_err_bundle, all_norm_err_lc, all_norm_err_no_lc]
+    names = ['Bundle', 'Loop Closure', 'Without Loop Closure']
+    for j in range(len(all_errors)):
+        errors = all_errors[j]
+        plt.figure(figsize=(10, 6))
+        error_labels = [f'{names[j]} norm error of seq length {k}' for k in sub_section_length]
+        colors = ['blue', 'green', 'red', 'purple', 'orange']
 
-    for i in range(len(errors)):
-        plt.plot(all_x_axis[i], errors[i], color=colors[i], label=error_labels[i])
+        for i in range(len(errors)):
+            plt.plot(all_x_axis[i], errors[i], color=colors[i], label=error_labels[i])
 
-    # Adding labels and title
-    plt.ylabel('Norm Error Magnitude')
-    plt.title('Relative pose estimation location error as a function of subsequence length, PNP')
-    plt.grid(True, axis='y', linestyle='--', alpha=0.7)
-    plt.legend()
+        location_err_means = [np.mean(errors[i]) for i in range(len(sub_section_length))]
+        over_all_location_err_mean = np.mean(np.array(location_err_means))
+        plt.plot(all_x_axis[0], [over_all_location_err_mean] * len(all_x_axis[0]), color='black',
+                 label='Mean location error', linestyle='-.')
+        print(f"overall mean location error for {names[j]} is {over_all_location_err_mean}")
 
-    plt.figure(figsize=(10, 6))
-    errors = all_deg_err
-    error_labels = [f'Bundles angle err of seq length {i}' for i in sub_section_length]
+        # Adding labels and title
+        plt.ylabel('Norm Error Magnitude')
+        plt.title(f'Relative pose estimation location error as a function of subsequence length, {names[j]}')
+        plt.grid(True, axis='y', linestyle='--', alpha=0.7)
+        plt.legend()
 
-    for i in range(len(errors)):
-        plt.plot(all_x_axis[i], errors[i], color=colors[i], label=error_labels[i])
+    all_errors = [all_deg_err_bundle, all_deg_err_lc, all_deg_err_no_lc]
+    for j in range(len(all_errors)):
+        errors = all_errors[j]
+        plt.figure(figsize=(10, 6))
+        error_labels = [f'{names[j]} angle error of seq length {k}' for k in sub_section_length]
+        # error_labels = [f'Bundles angle err of seq length {i}' for i in sub_section_length]
+        for i in range(len(errors)):
+            plt.plot(all_x_axis[i], errors[i], color=colors[i], label=error_labels[i])
+        # plt.plot(all_x_axis[0], [over_all_angle_err_mean] * len(all_x_axis[0]), color='black', label='Mean angle error',
+        #          linestyle='-.')
+        angle_err_means = [np.mean(errors[i]) for i in range(len(sub_section_length))]
+        over_all_angle_err_mean = np.mean(np.array(angle_err_means))
+        plt.plot(all_x_axis[0], [over_all_angle_err_mean] * len(all_x_axis[0]), color='black',
+                 label='Mean angle error', linestyle='-.')
+        print(f"overall mean angle error for {names[j]} is {over_all_angle_err_mean}")
 
-    # Adding labels and title
-    plt.ylabel('Error in degrees')
-    plt.title('Relative pose estimation angle error as a function of subsequence length, PNP')
-    plt.grid(True, axis='y', linestyle='--', alpha=0.7)
-    plt.legend()
+        # Adding labels and title
+        plt.ylabel('Error in degrees')
+        plt.title(f'Relative pose estimation angle error as a function of subsequence length, {names[j]}')
+        plt.grid(True, axis='y', linestyle='--', alpha=0.7)
+        plt.legend()
+
+
+def calculate_uncertenties_loc_deg(pose_graph, result):
+    """
+    Plot graphs of location uncertainty sizes for the pose graph with and without loop closures.
+
+    :param result: Pose estimates without loop closures.
+    :param pose_graph: Pose graph without loop closures.
+    """
+    # Initialize covariance dictionary and Dijkstra graph for the pose graph without loop closures
+    marginals = gtsam.Marginals(pose_graph, result)
+    locations_uncertainties = []
+    rotations_uncertienties = []
+    poses = gtsam.utilities.allPose3s(result)
+    for key in poses.keys():
+        marginal_covariance = marginals.marginalCovariance(key)
+        locations_uncertainties.append(np.linalg.det(marginal_covariance[3:, 3:]))
+        rotations_uncertienties.append(np.linalg.det(marginal_covariance[:3, :3]))
+    # # Calculate determinant of cumulative covariance for each camera frame without loop closures
+    # for c_n in index_list[:]:
+    #     # cur_index_list = dijkstra_graph.get_shortest_path(index_list[0], c_n)
+    #     # rel_cov = get_relative_covariance(cur_index_list, marginals)
+    #     locations_uncertainties.append(np.linalg.det(rel_cov[3:, 3:]))
+    #     rotations_uncertienties.append(np.linalg.det(rel_cov[:3, :3]))
+
+    return locations_uncertainties, rotations_uncertienties
+
+def plot_loc_deg_uncertainties(pg_lc,pg_no_lc):
+    """
+    Plot location and rotation uncertainties for the pose graph with and without loop closures.
+
+    :param pg_lc: Pose graph with loop closures.
+    :param pg_no_lc: Pose graph without loop closures.
+    """
+    # Calculate uncertainties for the pose graph with and without loop closures
+    loc_uncertainties_lc, rot_uncertainties_lc = calculate_uncertenties_loc_deg(pg_lc.graph, pg_lc.initial_estimate)
+    loc_uncertainties_no_lc, rot_uncertainties_no_lc = calculate_uncertenties_loc_deg(pg_no_lc.graph, pg_no_lc.initial_estimate)
+
+    log_loc_uncertainties_lc = np.log(np.array(loc_uncertainties_lc))
+    log_loc_uncertainties_no_lc = np.log(np.array(loc_uncertainties_no_lc))
+    # log_rot_uncertainties_lc = np.log(np.array(rot_uncertainties_lc))
+    log_rot_uncertainties_lc = np.array(rot_uncertainties_lc)
+    # log_rot_uncertainties_no_lc = np.log(np.array(rot_uncertainties_no_lc))
+    log_rot_uncertainties_no_lc = np.array(rot_uncertainties_no_lc)
+
+    # Plot locations uncertainties with and without loop closures
+    plt.figure()
+    plt.plot(get_index_list(pg_lc.result), log_loc_uncertainties_lc, label='log Location uncertainty with loop closures', color='red')
+
+    plt.plot(get_index_list(pg_no_lc.result), log_loc_uncertainties_no_lc, label='log Location uncertainty without loop closures', color='blue')
+
+
+    # Plot locations uncertainties with and without loop closures
+    plt.figure()
+    plt.plot(get_index_list(pg_lc.result), log_rot_uncertainties_lc, label='log rotation uncertainty with loop closures', color='red')
+    plt.plot(get_index_list(pg_no_lc.result), log_rot_uncertainties_no_lc, label='log rotation uncertainty without loop closures', color='blue')
+
+    # # Plot location uncertainties
+    # plt.figure(figsize=(10, 6))
+    # plt.plot(loc_uncertainties_lc, label='Location uncertainty with loop closures')
+    # plt.plot(loc_uncertainties_no_lc, label='Location uncertainty without loop closures')
+    # plt.title('Location uncertainties for pose graph with and without loop closures')
+    # plt.xlabel('Frame number')
+    # plt.ylabel('Determinant of covariance matrix')
+    # plt.legend()
+    #
+    # # Plot rotation uncertainties
+    # plt.figure(figsize=(10, 6))
+    # plt.plot(rot_uncertainties_lc, label='Rotation uncertainty with loop closures')
+    # plt.plot(rot_uncertainties_no_lc, label='Rotation uncertainty without loop closures')
+    # plt.title('Rotation uncertainties for pose graph with and without loop closures')
+    # plt.xlabel('Frame number')
+    # plt.ylabel('Determinant of covariance matrix')
+    # plt.legend()
+
 
 def load_bundles_list(base_filename):
     """ load TrackingDB to base_filename+'.pkl' file. """
@@ -884,34 +998,101 @@ def load_bundles_list(base_filename):
     return bundles
 
 
+def run_analysis(bundles_list, db, pose_graph_lc, pose_graph_no_lc):
+    db = TrackingDB().load(SIFT_DB_PATH)
+    bundles_list = load_bundles_list()
+
+    total_tracks = total_number_of_tracks(db)
+    num_frames = number_of_frames(db)
+    mean_length = mean_track_length(db)
+    max_length = max_track_length(db)
+    min_length = min_track_length(db)
+    mean_frame_links = mean_number_of_frame_links(db)
+
+    print(f"Total number of tracks: {total_tracks}")
+    print(f"Total number of frames: {num_frames}")
+    print(f"Mean track length: {mean_length}, Max track length: {max_length}, Min track length: {min_length}")
+    print(f"Mean number of frame links: {mean_frame_links}")
+
+    # Compute outgoing tracks
+    outgoing_tracks = compute_outgoing_tracks(db)
+
+    # Plot the connectivity graph
+    plot_connectivity_graph(outgoing_tracks)
+
+    # Compute matches count
+    matches_count = compute_matches_count(db)
+
+    # Plot the matches count graph
+    plot_matches_count_graph(matches_count)
+
+    # Plot the inliers percentage graph
+    plot_inliers_percentage_graph(db.frameID_to_inliers_percent)
+
+    # Calculate track lengths
+    track_lengths = calculate_track_lengths(db)
+
+    # Plot the track length histogram
+    plot_track_length_histogram(track_lengths)
+
+    # Plot the reprojection error vs track length
+    plot_reprojection_error_vs_track_length(db)
+
+    # Plot mean factor error
+    plot_mean_factor_error(bundles_list)
+
+    # Plot median projection error
+    plot_median_projection_error(db, bundles_list)
+
+    # Plot trajectory overall
+    plot_trajectory_over_all(db, )
+
+    # absolute_pnp_estimation_error
+    result_with_lc = pose_graph_lc.result
+    result_without_lc = pose_graph_no_lc.result
+    Absolute_PnP_estimation_error(db, result_with_lc, result_without_lc)
+
+    # relative error between consecutive keyframes, bundles and pnp
+    plot_relative_error_consequtive_kf(bundles_dict, db)
+
+    # relative Bundle estimation error over sub sections
+    rel_bundle_seq_err(bundles_dict, pose_graph_lc.result, pose_graph_no_lc.result)
+
+    # relative PnP estimation error over sub sections
+    rel_pnp_seq_err(db)
+
+    # Plot location and rotation uncertainties for the pose graph with and without loop closures
+    plot_loc_deg_uncertainties(pose_graph_lc, pose_graph_no_lc)
+
+    plt.show()
+
+
 if __name__ == '__main__':
     db = TrackingDB()
     # serialized_path = arguments.DATA_HEAD + "/docs/AKAZE/db/db_3359"
     # serialized_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/ORB/db/db_500"
     serialized_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/SIFT/db/db_3359"
-    # bundles_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/bundles_AKAZE"
-    # db.load(serialized_path)
-    # rel_pnp_seq_err(db)
-    # plt.show()
-    # print(f"len keyframes: {len(get_keyframes(db))}")
-    # plt.show()
-    # key_frames = get_keyframes(db)
+    db.load(serialized_path)
+
+    key_frames = get_keyframes(db)
     #
-    # all_bundles = []
-    # pose_graph = PoseGraph()
-    # for key_frame in key_frames:
-    #     first_frame = key_frame[0]
-    #     last_frame = key_frame[1]
-    #     graph, initial, cameras_dict, frames_dict = create_single_bundle(key_frame[0], key_frame[1], db)
-    #     graph, result = optimize_graph(graph, initial)
+    all_bundles = []
+    pose_graph_lc = PoseGraph()
+    pose_graph_no_lc = PoseGraph()
+    for key_frame in key_frames:
+        first_frame = key_frame[0]
+        last_frame = key_frame[1]
+        graph, initial, cameras_dict, frames_dict = create_single_bundle(key_frame[0], key_frame[1], db)
+        graph, result = optimize_graph(graph, initial)
+
+        bundle_dict = {'graph': graph, 'initial': initial, 'cameras_dict': cameras_dict, 'frames_dict': frames_dict,
+                       'result': result, 'keyframes': key_frame}
+        all_bundles.append(bundle_dict)
+        pose_graph_lc.add_bundle(bundle_dict)
+        pose_graph_no_lc.add_bundle(bundle_dict)
+        print(f"Bundle {key_frame} added to the pose graph")
     #
-    #     bundle_dict = {'graph': graph, 'initial': initial, 'cameras_dict': cameras_dict, 'frames_dict': frames_dict,
-    #                    'result': result, 'keyframes': key_frame}
-    #     all_bundles.append(bundle_dict)
-    #     pose_graph.add_bundle(bundle_dict)
-    #     print(f"Bundle {key_frame} added to the pose graph")
-    #
-    # result = pose_graph.optimize()
+    result = pose_graph.optimize()
     # pose_graph.save("/Users/mac/67604-SLAM-video-navigation/final_project/sift_p_graph")
     # bundles = load_bundles_list("/Users/mac/67604-SLAM-video-navigation/final_project/SIFT_BUNDLES")
     #
@@ -937,13 +1118,17 @@ if __name__ == '__main__':
 
     # result_with_lc = pose_grpah_lc.result
 
-    bundles_list = load_bundles_list("/Users/mac/67604-SLAM-video-navigation/final_project/SIFT_BUNDLES")
-    bundles_dict = dict()
-    for i in range(len(bundles_list)):
-        bundles_dict[i] = bundles_list[i]
-    # Absolute_PnP_estimation_error(db, result_with_lc, result_without_lc)
-    # plot_relative_error_consequtive_kf(bundles_dict, db)
-    rel_bundle_seq_err(bundles_dict)
+    # bundles_list = load_bundles_list("/Users/mac/67604-SLAM-video-navigation/final_project/SIFT_BUNDLES")
+    # bundles_dict = dict()
+    # for i in range(len(bundles_list)):
+    #     bundles_dict[i] = bundles_list[i]
+
+    pose_graph_lc = PoseGraph.load("/Users/mac/67604-SLAM-video-navigation/final_project/sift_p_graph_with_LC")
+    pose_graph_no_lc = PoseGraph.load("/Users/mac/67604-SLAM-video-navigation/final_project/sift_p_graph")
+
+    # relative Bundle estimation error over sub sections
+    plot_loc_deg_uncertainties(pose_graph_lc, pose_graph_no_lc)
+
     plt.show()
 
     # Initialize the relative covariance dictionary and Dijkstra graph
