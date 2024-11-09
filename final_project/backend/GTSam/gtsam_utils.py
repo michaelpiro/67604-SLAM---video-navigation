@@ -20,11 +20,15 @@ def load(base_filename):
     print('Bundles loaded from', filename)
     return bundles, graphs, results
 
+
 #
-# def calculate_relative_transformation(T_A, T_B):
-#     """Calculate the relative transformation between two poses.
-#     more specifically, how b is seen from a."""
-#     return np.linalg.inv(T_A) @ T_B
+def T_B_from_T_A(T_A, T_B):
+    """Calculate the relative transformation between two poses.
+    more specifically, how b is seen from a."""
+    # if T_A.shape == (3, 4):
+    #     T_A = np.vstack((T_A, np.array([0, 0, 0, 1])))
+
+    return get_inverse(T_A) @ np.vstack((T_B, np.array([0, 0, 0, 1])))
 
 
 def get_inverse(T):
@@ -96,10 +100,8 @@ def calculate_relative_transformation(db: TrackingDB, first_frame_idx, last_fram
     return transformations
 
 
-
 def calc_rel_T(db: TrackingDB, frame):
-    """Calculate the realtive transformations between the first and every frame between
-        the first and the last frame."""
+    """Calculate the realtive transformations between 2 consecutive frames."""
 
     if frame == 0:
         return M1
@@ -190,24 +192,59 @@ def get_locations_from_gtsam(result):
         locations.append(location)
     return locations
 
-def get_locations_from_gtsam(result):
+
+def get_poses_from_gtsam(result):
     """
     Extract camera locations from the GTSAM result.
 
     :param result: Current optimized pose estimates.
     :return: List of camera locations.
     """
-    locations = []
+    rotations = dict()
     index_list = get_index_list(result)
+    for i,index in enumerate(index_list):
+        pose = result.atPose3(gtsam.symbol('c', index))
+        rotation = pose.rotation().matrix().T
+        # Verify that the location matches the pose's translation
+        rotations[i] = rotation
+    rotation_list = [rotations[i] for i in range(len(rotations))]
+    return rotation_list
+
+
+def calculate_dist_traveled(transformations):
+    """Calculate the distance traveled between the first and the last frame."""
+    dist = 0
+    accumulate_distance = [0]
+    for i in range(1, len(transformations)):
+        T_B = transformations[i]
+        T_A = transformations[i - 1]
+        rel_t = T_B_from_T_A(T_A, T_B)
+        R = rel_t[:, :3]
+        t = rel_t[:, 3:]
+        loc = (-R.transpose() @ t).reshape((3))
+        dist = np.linalg.norm(loc)
+        accumulate_distance.append(accumulate_distance[-1] + dist)
+    return accumulate_distance
+
+
+
+
+
+def get_bundle_global_mat(result, global_transformation):
+    """
+    Extract camera locations from the GTSAM result.
+
+    :param result: Current optimized pose estimates.
+    :return: List of camera locations.
+    """
+    index_list = get_index_list(result)
+    bundle_global_mat = []
     for index in index_list:
         pose = result.atPose3(gtsam.symbol('c', index))
         location = get_camera_location_from_gtsam(pose)
-        # Verify that the location matches the pose's translation
-        assert location[0] == pose.x()
-        assert location[1] == pose.y()
-        assert location[2] == pose.z()
-        locations.append(location)
-    return locations
+        rotation = pose.rotation().matrix().T
+
+
 
 def save(data, base_filename):
     """ save TrackingDB to base_filename+'.pkl' file. """

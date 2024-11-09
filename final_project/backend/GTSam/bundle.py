@@ -172,7 +172,7 @@ def get_negative_z_points(result, graph):
         if isinstance(factor, gtsam.GenericStereoFactor3D):
             point = get_factor_point(factor, result)
             # print(point)
-            if point[2] < 0 or point[2] > 5000:
+            if point[2] < 0 or point[2] > 1000:
                 camera_symbol, track_symbol = get_factor_symbols(factor)
                 values_to_remove.append(track_symbol)
                 factors_to_remove.append(i)

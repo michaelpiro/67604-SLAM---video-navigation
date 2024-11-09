@@ -177,33 +177,33 @@ TOTAL_IMAGES = LEN_DATA_SET
 
 #
 
-if __name__ == '__main__':
-
-    # load the database
-    serialized_path = arguments.DATA_HEAD + "/docs/SIFT/db/db_3359"
-    # serialized_path = "/Users/mac/67604-SLAM-video-navigation/final_project/SIFT_DB"
-
-    # db = run(serialized_path)
-    db = TrackingDB()
-    db.load(serialized_path)
-
-    key_frames = bundle.get_keyframes(db)
-    pose_graph = PoseGraph()
-    all_bundles = []
-    for key_frame in key_frames:
-        first_frame = key_frame[0]
-        last_frame = key_frame[1]
-        graph, initial, cameras_dict, frames_dict = bundle.create_single_bundle(key_frame[0], key_frame[1], db)
-        graph, result = bundle.optimize_graph(graph, initial)
-
-        bundle_dict = {'graph': graph, 'initial': initial, 'cameras_dict': cameras_dict, 'frames_dict': frames_dict,
-                       'result': result, 'keyframes': key_frame}
-        all_bundles.append(bundle_dict)
-        pose_graph.add_bundle(bundle_dict)
-        print(f"Bundle {key_frame} added to the pose graph")
-
-    pose_graph.optimize()
-    run_analysis(db, all_bundles)
+# if __name__ == '__main__':
+#
+#     # load the database
+#     serialized_path = arguments.DATA_HEAD + "/docs/SIFT/db/db_3359"
+#     # serialized_path = "/Users/mac/67604-SLAM-video-navigation/final_project/SIFT_DB"
+#
+#     # db = run(serialized_path)
+#     db = TrackingDB()
+#     db.load(serialized_path)
+#
+#     key_frames = bundle.get_keyframes(db)
+#     pose_graph = PoseGraph()
+#     all_bundles = []
+#     for key_frame in key_frames:
+#         first_frame = key_frame[0]
+#         last_frame = key_frame[1]
+#         graph, initial, cameras_dict, frames_dict = bundle.create_single_bundle(key_frame[0], key_frame[1], db)
+#         graph, result = bundle.optimize_graph(graph, initial)
+#
+#         bundle_dict = {'graph': graph, 'initial': initial, 'cameras_dict': cameras_dict, 'frames_dict': frames_dict,
+#                        'result': result, 'keyframes': key_frame}
+#         all_bundles.append(bundle_dict)
+#         pose_graph.add_bundle(bundle_dict)
+#         print(f"Bundle {key_frame} added to the pose graph")
+#
+#     pose_graph.optimize()
+#     run_analysis(db, all_bundles)
 
 
 

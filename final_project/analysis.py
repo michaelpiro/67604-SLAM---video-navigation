@@ -4,25 +4,27 @@ from typing import Dict, List, Tuple
 
 import gtsam
 from matplotlib import pyplot as plt
-
+from gtsam.utils.plot import plot_trajectory
 from final_project import arguments
 from final_project.algorithms.triangulation import linear_least_squares_triangulation
 from final_project.backend.GTSam.pose_graph import PoseGraph
 from final_project.backend.database.tracking_database import TrackingDB
-from final_project.backend.GTSam.gtsam_utils import get_factor_symbols,calculate_global_transformation, save
+from final_project.backend.GTSam.gtsam_utils import get_factor_symbols, calculate_global_transformation, save, \
+    get_poses_from_gtsam, get_index_list, T_B_from_T_A, gtsam_pose_to_T, calculate_dist_traveled
 from final_project.backend.GTSam.bundle import K_OBJECT, get_keyframes, create_single_bundle, optimize_graph
 from final_project.backend.GTSam.gtsam_utils import load
 
 import numpy as np
 
-from final_project.backend.loop.loop_closure import find_loops
+from final_project.backend.loop.loop_closure import find_loops, get_locations_ground_truths, \
+    plot_trajectory2D_ground_truth
 
 SUBSET_FACTOR = 0.005
 
 ####################################################################################################
 # TRACKING ANALYSIS
 ####################################################################################################
-from final_project.utils import K, M2
+from final_project.utils import K, M2, M1
 
 
 def track_length(tracking_db: TrackingDB, trackId) -> int:
@@ -379,7 +381,10 @@ def plot_reprojection_error_vs_track_length(tracking_db: TrackingDB, bundles, ke
     plot_reprojection_errors(distance_dict)
 
 
-def run_analysis(db, bundles_list):
+def run_analysis(bundles_list):
+    db = TrackingDB().load(SIFT_DB_PATH)
+    bundles_list = load_bundles_list()
+
     total_tracks = total_number_of_tracks(db)
     num_frames = number_of_frames(db)
     mean_length = mean_track_length(db)
@@ -416,18 +421,14 @@ def run_analysis(db, bundles_list):
     # Plot the reprojection error vs track length
     plot_reprojection_error_vs_track_length(db)
 
-    # bundles_dict, graphs, results = load(bundles_path)
-    # bundles = []
-    # bundles_keys = sorted(list(bundles_dict.keys()))
-    #
-    # for key in bundles_keys:
-    #     bundles.append(bundles_dict[key])
-
     # Plot mean factor error
     plot_mean_factor_error(bundles_list)
 
     # Plot median projection error
     plot_median_projection_error(db, bundles_list)
+
+    # Plot trajectory overall
+    plot_trajectory_over_all(db, )
 
     plt.show()
 
@@ -436,7 +437,7 @@ import cv2
 import numpy as np
 
 from final_project.Inputs import read_extrinsic_matrices
-from final_project.arguments import LEN_DATA_SET
+from final_project.arguments import LEN_DATA_SET, SIFT_DB_PATH, GROUND_TRUTH_PATH
 from final_project.backend.GTSam.gtsam_utils import get_locations_from_gtsam
 from final_project.backend.database.tracking_database import TrackingDB
 from final_project.backend.GTSam.gtsam_utils import calculate_relative_transformation
@@ -449,7 +450,7 @@ def calculate_camera_locations(camera_transformations):
         R = T[:, :3]
         t = T[:, 3:]
         loc = np.vstack((loc, (-R.transpose() @ t).reshape((3))))
-    return loc
+    return loc[1:, :]
 
 
 def plot_trajectory_over_all(db: TrackingDB, result, result_without_closure):
@@ -477,7 +478,7 @@ def plot_trajectory_over_all(db: TrackingDB, result, result_without_closure):
 
     # Plot each trajectory with a distinct color and label
     plt.scatter(gt_x, gt_z, color='red', marker='o', label='Ground Truth', s=1)
-    plt.scatter(pnp_x, pnp_z, color='blue', marker='x', label='PNP Transformations',s=1)
+    plt.scatter(pnp_x, pnp_z, color='blue', marker='x', label='PNP Transformations', s=1)
     plt.scatter(lc_x, lc_z, color='green', marker='^', label='Loop Closures', s=1)
     plt.scatter(ba_x, ba_z, color='purple', marker='s', label='Bundle Adjustment', s=1)
 
@@ -501,8 +502,8 @@ def calculate_error_deg(estimated_Transformations, ground_truth_transformations)
     assert len(estimated_Transformations) == len(ground_truth_transformations)
     errors = []
     for Ra, Rb in zip(estimated_Transformations, ground_truth_transformations):
-        Ra = Ra[:, :3]
-        Rb = Rb[:, :3]
+        Ra = Ra[:3, :3]
+        Rb = Rb[:3, :3]
         R = Ra.T @ Rb
         rvec, _ = cv2.Rodrigues(R)
         error = np.linalg.norm(rvec) * 180 / np.pi
@@ -510,7 +511,7 @@ def calculate_error_deg(estimated_Transformations, ground_truth_transformations)
     return errors
 
 
-def Absolute_PnP_estimation_error(db: TrackingDB):
+def Absolute_PnP_estimation_error(db: TrackingDB, result, result_without_closure):
     """
     absolute PNP estimation error, includes x,y,z, and deg errors
     """
@@ -520,32 +521,357 @@ def Absolute_PnP_estimation_error(db: TrackingDB):
 
     # Calculate trajectories
     ground_truth_locations = calculate_camera_locations(ground_truth_transformations)
-    PNP_locations = calculate_camera_locations(PNP_transformations)
+    pnp_transformation_list = [PNP_transformations[i] for i in range(len(PNP_transformations))]
+    PNP_locations = calculate_camera_locations(pnp_transformation_list)
+
     # Extract X and Z coordinates for each trajectory
-    gt_x, gt_y, gt_z = zip(*[(loc[0], loc[1], loc[2]) for loc in ground_truth_locations])
-    pnp_x, pnp_y, pnp_z = zip(*[(loc[0], loc[1], loc[2]) for loc in PNP_locations])
-    #X axis error, Y axis error, Z axis error, Total location error norm (m)
-    X_error = np.linalg.norm(pnp_x - gt_x)
-    Y_error = np.linalg.norm(pnp_y - gt_y)
-    Z_error = np.linalg.norm(pnp_z - gt_z)
-    norm_error = np.linalg.norm(np.array(ground_truth_locations) - np.array(PNP_locations))
-    #Angle error (deg)
-    angle_errors = calculate_error_deg(PNP_transformations, ground_truth_transformations)
+    gt_x, gt_y, gt_z = ground_truth_locations[:, 0], ground_truth_locations[:, 1], ground_truth_locations[:, 2]
+    pnp_x, pnp_y, pnp_z = PNP_locations[:, 0], PNP_locations[:, 1], PNP_locations[:, 2]
+    # X axis error, Y axis error, Z axis error, Total location error norm (m)
+    x_error = np.abs(pnp_x - gt_x)
+    y_error = np.abs(pnp_y - gt_y)
+    z_error = np.abs(pnp_z - gt_z)
+
+    norm_error = np.linalg.norm(ground_truth_locations - PNP_locations, axis=1)
+    # Angle error (deg)
+    angle_errors = calculate_error_deg(pnp_transformation_list, ground_truth_transformations)
 
     # Plotting
-    errors = [X_error, Y_error, Z_error, norm_error, angle_errors]
+    errors = [x_error, y_error, z_error, norm_error, angle_errors]
     error_labels = ['X Error (m)', 'Y Error (m)', 'Z Error (m)', 'Total Location Error Norm (m)', 'Angle Error (deg)']
-
+    colors = ['blue', 'green', 'red', 'purple', 'orange']
+    frame_num = [i for i in range(LEN_DATA_SET)]
     plt.figure(figsize=(10, 6))
-    plt.bar(error_labels, errors, color=['blue', 'green', 'red', 'purple', 'orange'])
+    for i in range(len(errors)):
+        plt.plot(frame_num, errors[i], color=colors[i], label=error_labels[i])
 
     # Adding labels and title
     plt.ylabel('Error Magnitude')
     plt.title('Absolute PnP Estimation Errors')
     plt.grid(True, axis='y', linestyle='--', alpha=0.7)
+    plt.legend(loc='upper right')
+
+
+def absolute_pg(result, result_without_closure):
+    """
+    Plot graphs of absolute location errors with and without loop closures.
+
+    :param result: Pose estimates with loop closures.
+    :param result_without_closure: Pose estimates without loop closures.
+    """
+    # Extract locations from both results
+    locations = get_locations_from_gtsam(result)
+    locations_without_closure = get_locations_from_gtsam(result_without_closure)
+
+    poses_with_closure = get_poses_from_gtsam(result)
+    poses_without_closure = get_poses_from_gtsam(result_without_closure)
+    cameras = get_index_list(result)
+
+    ground_truth_transformations = read_extrinsic_matrices(n=LEN_DATA_SET)
+    relevant_ground_truth_transformations = [ground_truth_transformations[i] for i in cameras]
+
+    # Calculate trajectories
+    ground_truth_locations = calculate_camera_locations(ground_truth_transformations)
+
+    # Calculate angles
+    angles_with_closure = calculate_error_deg(poses_with_closure, relevant_ground_truth_transformations)
+    angles_without_closure = calculate_error_deg(poses_without_closure, relevant_ground_truth_transformations)
+    # Plot location errors with loop closure
+    plt.figure()
+    frames = cameras
+    plt.plot(
+        frames,
+        [np.linalg.norm(locations[i] - ground_truth_locations[cameras[i]]) for i in range(len(locations))],
+        color='r', label="L2 norm"
+    )
+    plt.plot(
+        frames,
+        [np.linalg.norm(locations[i][0] - ground_truth_locations[cameras[i]][0]) for i in range(len(locations))],
+        color='b', label="x error"
+    )
+    plt.plot(
+        frames,
+        [np.linalg.norm(locations[i][1] - ground_truth_locations[cameras[i]][1]) for i in range(len(locations))],
+        color='g', label="y error"
+    )
+    plt.plot(
+        frames,
+        [np.linalg.norm(locations[i][2] - ground_truth_locations[cameras[i]][2]) for i in range(len(locations))],
+        color='y', label="z error"
+    )
+    plt.plot(
+        cameras, angles_with_closure,
+        color='purple', label="angle error"
+    )
+
+    plt.legend()
+    plt.title("location error with loop closure")
+
+    # Plot location errors without loop closure
+    plt.figure()
+    plt.plot(
+        frames,
+        [np.linalg.norm(locations_without_closure[i] - ground_truth_locations[cameras[i]]) for i in
+         range(len(locations_without_closure))],
+        color='r', label="L2 norm"
+    )
+    plt.plot(
+        frames,
+        [np.linalg.norm(locations_without_closure[i][0] - ground_truth_locations[cameras[i]][0]) for i in
+         range(len(locations_without_closure))],
+        color='b', label="x error"
+    )
+    plt.plot(
+        frames,
+        [np.linalg.norm(locations_without_closure[i][1] - ground_truth_locations[cameras[i]][1]) for i in
+         range(len(locations_without_closure))],
+        color='g', label="y error"
+    )
+    plt.plot(
+        frames,
+        [np.linalg.norm(locations_without_closure[i][2] - ground_truth_locations[cameras[i]][2]) for i in
+         range(len(locations_without_closure))],
+        color='y', label="z error"
+    )
+    plt.plot(
+        cameras, angles_without_closure,
+        color='purple', label="angle error"
+    )
+
+    plt.legend()
+    plt.title("location error without loop closure")
+    plt.show()
+
+
+
+
+def calculate_norm_error(estimated_transformtions, ground_truth_transformations):
+    """claculate the norm error of every transformation between estimated and ground truth"""
+    # Calculate trajectories
+    ground_truth_locations = calculate_camera_locations(ground_truth_transformations)
+    estimated_locations = calculate_camera_locations(estimated_transformtions)
+    # X axis error, Y axis error, Z axis error, Total location error norm (m)
+    norm_error = np.linalg.norm(np.array(ground_truth_locations) - np.array(estimated_locations), axis=1)
+    return norm_error
+
+
+def plot_relative_error_consequtive_kf(bundles: Dict, db: TrackingDB):
+    """
+    plot the relative error between each conseqtive kfs in ground truth, PNP, and bundle
+    """
+    gt = read_extrinsic_matrices(GROUND_TRUTH_PATH, LEN_DATA_SET)
+    bundles_list = [bundles[i] for i in range(len(bundles))]
+    gt_rel = list()
+    bundle_rel = list()
+    pnp_rel = list()
+    x_axis = list()
+    for bundle in bundles_list:
+        result = bundle["result"]
+        key_frames = bundle["keyframes"]
+        first_frame = key_frames[0]
+        last_frame = key_frames[-1]
+        x_axis.append(last_frame)
+        pose_last_kf = result.atPose3(gtsam.symbol("c", last_frame))
+        bundle_rel.append(gtsam_pose_to_T(pose_last_kf))
+        gt_rel.append(T_B_from_T_A(gt[first_frame], gt[last_frame]))
+        pnp_rel.append(calculate_relative_transformation(db, first_frame, last_frame)[last_frame - first_frame])
+    pnp_norm_err = calculate_norm_error(pnp_rel, gt_rel)
+    bundle_norm_err = calculate_norm_error(bundle_rel, gt_rel)
+    pnp_deg_err = calculate_error_deg(pnp_rel, gt_rel)
+    bunle_deg_err = calculate_error_deg(bundle_rel, gt_rel)
+
+    # Plotting
+    errors = [pnp_norm_err, bundle_norm_err, pnp_deg_err, bunle_deg_err]
+    error_labels = ['PNP norm Error (m)', 'bundle norm Error (m)', 'PNP angle Error (deg)', 'buncle angle Error(deg)']
+    colors = ['blue', 'green', 'red', 'purple', 'orange']
+
+    # plt.bar(error_labels, errors, color=['blue', 'green', 'red', 'yellow'])
+    plt.figure(figsize=(10, 6))
+    # for i in range(len(errors)):
+    plt.plot(x_axis, errors[0], color=colors[0], label=error_labels[0])
+    plt.plot(x_axis, errors[1], color=colors[1], label=error_labels[1])
+
+    # Adding labels and title
+    plt.ylabel('Error Magnitude')
+    plt.title('Relative pose estimation location error of every two consecutive keyframe, PNP and bundles')
+    plt.grid(True, axis='y', linestyle='--', alpha=0.7)
+    plt.legend()
+
+    plt.figure(figsize=(10, 6))
+    # for i in range(len(errors)):
+    plt.plot(x_axis, errors[2], color=colors[2], label=error_labels[2])
+    plt.plot(x_axis, errors[3], color=colors[3], label=error_labels[3])
+
+    # Adding labels and title
+    plt.ylabel('Error Magnitude')
+    plt.title('Relative pose estimation angle error of every two consecutive keyframe, PNP and bundles')
+    plt.grid(True, axis='y', linestyle='--', alpha=0.7)
+    plt.legend()
 
     # Show plot
     plt.show()
+
+
+def rel_pnp_seq_err(db):
+    """
+    plot the relative error between each conseqtive kfs in ground truth, PNP, and bundle
+    """
+
+    sub_section_length = [100, 400, 800]
+    gt = read_extrinsic_matrices(GROUND_TRUTH_PATH, LEN_DATA_SET)
+    pnp_global_trans = calculate_relative_transformation(db, 1, LEN_DATA_SET)
+    pnp_global_trans = [pnp_global_trans[i] for i in range(len(pnp_global_trans))]
+    accumulate_distance = calculate_dist_traveled(gt)
+    # plt.figure(figsize=(10, 6))
+    all_norm_err = list()
+    all_deg_err = list()
+    all_x_axis = list()
+    for j, length in enumerate(sub_section_length):
+        gt_rel = list()
+        pnp_rel = list()
+        x_axis = list()
+        dist_traveled = []
+        for i in range(LEN_DATA_SET - length):
+            first_frame = i
+            last_frame = i + length
+            x_axis.append(first_frame)
+            dist_traveled += [accumulate_distance[last_frame] - accumulate_distance[first_frame]]
+            gt_rel.append(T_B_from_T_A(gt[first_frame][:3, :], gt[last_frame][:3, :]))
+            pnp_rel.append(T_B_from_T_A(pnp_global_trans[first_frame][:3, :], pnp_global_trans[last_frame][:3, :]))
+        dist_traveled = np.array(dist_traveled)
+        pnp_norm_err = calculate_norm_error(pnp_rel, gt_rel) / dist_traveled
+        pnp_deg_err = calculate_error_deg(pnp_rel, gt_rel) / dist_traveled
+        all_x_axis.append(x_axis)
+        all_norm_err.append(pnp_norm_err)
+        all_deg_err.append(pnp_deg_err)
+
+    # Plotting
+    plt.figure(figsize=(10, 6))
+    errors = all_norm_err
+    error_labels = [f'PNP norm err of seq length {i}' for i in sub_section_length]
+    colors = ['blue', 'green', 'red', 'purple', 'orange']
+
+    for i in range(len(errors)):
+        plt.plot(all_x_axis[i], errors[i], color=colors[i], label=error_labels[i])
+
+    # Adding labels and title
+    plt.ylabel('Norm Error Magnitude')
+    plt.title('Relative pose estimation location error as a function of subsequence length, PNP')
+    plt.grid(True, axis='y', linestyle='--', alpha=0.7)
+    plt.legend()
+
+    plt.figure(figsize=(10, 6))
+    errors = all_deg_err
+    error_labels = [f'PNP angle err of seq length {i}' for i in sub_section_length]
+
+    for i in range(len(errors)):
+        plt.plot(all_x_axis[i], errors[i], color=colors[i], label=error_labels[i])
+
+    # Adding labels and title
+    plt.ylabel('Error in degrees')
+    plt.title('Relative pose estimation angle error as a function of subsequence length, PNP')
+    plt.grid(True, axis='y', linestyle='--', alpha=0.7)
+    plt.legend()
+
+def get_closest_keyframe_index(key_frame_list, frame_index):
+    """
+    get the closest keyframe index to the given frame index
+    """
+    closest_index = min(key_frame_list, key=lambda x: abs(x - frame_index))
+    return closest_index
+
+def calculate_bundles_global_transformation(bundles_list: List):
+    """Calculate the global transformation of every keyframe in the bundles list"""
+    global_transformations = []
+    for i in range(len(bundles_list)):
+        bundle = bundles_list[i]
+        result = bundle["result"]
+        key_frames = bundle["keyframes"]
+        first_frame = key_frames[0]
+        last_frame = key_frames[-1]
+        if i == 0:
+            pose_first_kf = result.atPose3(gtsam.symbol("c", first_frame))
+            relative_trans = gtsam_pose_to_T(pose_first_kf)
+            global_transformations.append(relative_trans)
+
+            pose_last_kf = result.atPose3(gtsam.symbol("c", last_frame))
+            relative_trans = gtsam_pose_to_T(pose_last_kf)
+            global_trans = relative_trans @ np.vstack((global_transformations[-1], np.array([0, 0, 0, 1])))
+            global_transformations.append(global_trans)
+            continue
+        pose_last_kf = result.atPose3(gtsam.symbol("c", last_frame))
+        relative_trans = gtsam_pose_to_T(pose_last_kf)
+        global_trans = relative_trans @ np.vstack((global_transformations[-1], np.array([0, 0, 0, 1])))
+        global_transformations.append(global_trans)
+    return global_transformations
+
+
+
+def rel_bundle_seq_err(bundles: Dict):
+    sub_section_length = [100, 400, 800]
+    gt = read_extrinsic_matrices(GROUND_TRUTH_PATH, LEN_DATA_SET)
+    bundles_list = [bundles[i] for i in range(len(bundles))]
+    accumulate_distance = calculate_dist_traveled(gt)
+    all_key_frames_list = [0] + [bundle["keyframes"][-1] for bundle in bundles_list]
+    global_bundle_transformation = calculate_bundles_global_transformation(bundles_list)
+    all_norm_err = list()
+    all_deg_err = list()
+    all_x_axis = list()
+    for j, length in enumerate(sub_section_length):
+        gt_rel = list()
+        bundle_rel = list()
+        x_axis = list()
+        dist_traveled = []
+        for i,bundle in enumerate(bundles_list):
+            result = bundle["result"]
+            key_frames = bundle["keyframes"]
+            first_frame = key_frames[0]
+            last_frame = key_frames[-1]
+            x_axis.append(first_frame)
+            closest_key_frame = get_closest_keyframe_index(all_key_frames_list, first_frame+length)
+            closest_kf_index = all_key_frames_list.index(closest_key_frame)
+
+            dist_traveled += [accumulate_distance[closest_key_frame] - accumulate_distance[first_frame]]
+            T_a = global_bundle_transformation[i]
+            T_b = global_bundle_transformation[closest_kf_index]
+            estimated_T = T_B_from_T_A(T_a, T_b)
+            bundle_rel.append(estimated_T)
+            gt_rel.append(T_B_from_T_A(gt[first_frame], gt[closest_key_frame]))
+
+        dist_traveled = np.array(dist_traveled)
+        bundle_norm_err = calculate_norm_error(bundle_rel, gt_rel) / dist_traveled
+        bundle_deg_err = calculate_error_deg(bundle_rel, gt_rel) / dist_traveled
+        all_x_axis.append(x_axis)
+        all_norm_err.append(bundle_norm_err)
+        all_deg_err.append(bundle_deg_err)
+    # Plotting
+
+    plt.figure(figsize=(10, 6))
+    errors = all_norm_err
+    error_labels = [f'Bundles norm error of seq length {i}' for i in sub_section_length]
+    colors = ['blue', 'green', 'red', 'purple', 'orange']
+
+    for i in range(len(errors)):
+        plt.plot(all_x_axis[i], errors[i], color=colors[i], label=error_labels[i])
+
+    # Adding labels and title
+    plt.ylabel('Norm Error Magnitude')
+    plt.title('Relative pose estimation location error as a function of subsequence length, PNP')
+    plt.grid(True, axis='y', linestyle='--', alpha=0.7)
+    plt.legend()
+
+    plt.figure(figsize=(10, 6))
+    errors = all_deg_err
+    error_labels = [f'Bundles angle err of seq length {i}' for i in sub_section_length]
+
+    for i in range(len(errors)):
+        plt.plot(all_x_axis[i], errors[i], color=colors[i], label=error_labels[i])
+
+    # Adding labels and title
+    plt.ylabel('Error in degrees')
+    plt.title('Relative pose estimation angle error as a function of subsequence length, PNP')
+    plt.grid(True, axis='y', linestyle='--', alpha=0.7)
+    plt.legend()
 
 def load_bundles_list(base_filename):
     """ load TrackingDB to base_filename+'.pkl' file. """
@@ -553,11 +879,9 @@ def load_bundles_list(base_filename):
 
     with open(filename, 'rb') as file:
         data = pickle.load(file)
-        bundles= data
+        bundles = data
     print('Bundles loaded from', filename)
     return bundles
-
-
 
 
 if __name__ == '__main__':
@@ -566,38 +890,70 @@ if __name__ == '__main__':
     # serialized_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/ORB/db/db_500"
     serialized_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/SIFT/db/db_3359"
     # bundles_path = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/bundles_AKAZE"
-    db.load(serialized_path)
-    print(f"len keyframes: {len(get_keyframes(db))}")
+    # db.load(serialized_path)
+    # rel_pnp_seq_err(db)
+    # plt.show()
+    # print(f"len keyframes: {len(get_keyframes(db))}")
+    # plt.show()
+    # key_frames = get_keyframes(db)
+    #
+    # all_bundles = []
+    # pose_graph = PoseGraph()
+    # for key_frame in key_frames:
+    #     first_frame = key_frame[0]
+    #     last_frame = key_frame[1]
+    #     graph, initial, cameras_dict, frames_dict = create_single_bundle(key_frame[0], key_frame[1], db)
+    #     graph, result = optimize_graph(graph, initial)
+    #
+    #     bundle_dict = {'graph': graph, 'initial': initial, 'cameras_dict': cameras_dict, 'frames_dict': frames_dict,
+    #                    'result': result, 'keyframes': key_frame}
+    #     all_bundles.append(bundle_dict)
+    #     pose_graph.add_bundle(bundle_dict)
+    #     print(f"Bundle {key_frame} added to the pose graph")
+    #
+    # result = pose_graph.optimize()
+    # pose_graph.save("/Users/mac/67604-SLAM-video-navigation/final_project/sift_p_graph")
+    # bundles = load_bundles_list("/Users/mac/67604-SLAM-video-navigation/final_project/SIFT_BUNDLES")
+    #
+    # initial_estimate = pose_graph.initial_estimate
+    #
+    # print("done optimizing")
+    # find_loops(pose_graph)
+    # print("done finding loops")
+    #
+    # plot_trajectory_over_all(db, result,initial_estimate)
+    # Absolute_PnP_estimation_error(db)
+
+    path = arguments.DATA_HEAD + '/docs/pose_graph_result'
+    # data_list = load(path)
+    # gt = read_extrinsic_matrices(GROUND_TRUTH_PATH, LEN_DATA_SET)
+    # pose_grpah_no_lc = PoseGraph.load("/Users/mac/67604-SLAM-video-navigation/final_project/sift_p_graph")
+    # result_without_lc = pose_grpah_no_lc.result
+
+    # pose_grpah_lc = PoseGraph.load("/Users/mac/67604-SLAM-video-navigation/final_project/sift_p_graph_with_LC")
+    # plot_trajectory(0, pose_grpah_lc.result)
+    # plot_trajectory2D_ground_truth(pose_grpah_lc.result,"")
+    # plt.show()
+
+    # result_with_lc = pose_grpah_lc.result
+
+    bundles_list = load_bundles_list("/Users/mac/67604-SLAM-video-navigation/final_project/SIFT_BUNDLES")
+    bundles_dict = dict()
+    for i in range(len(bundles_list)):
+        bundles_dict[i] = bundles_list[i]
+    # Absolute_PnP_estimation_error(db, result_with_lc, result_without_lc)
+    # plot_relative_error_consequtive_kf(bundles_dict, db)
+    rel_bundle_seq_err(bundles_dict)
     plt.show()
-    key_frames = get_keyframes(db)
 
-    all_bundles = []
-    pose_graph = PoseGraph()
-    for key_frame in key_frames:
-        first_frame = key_frame[0]
-        last_frame = key_frame[1]
-        graph, initial, cameras_dict, frames_dict = create_single_bundle(key_frame[0], key_frame[1], db)
-        graph, result = optimize_graph(graph, initial)
+    # Initialize the relative covariance dictionary and Dijkstra graph
+    # data_list = [pose_grpah_object.graph, pose_grpah_object.result]
 
-        bundle_dict = {'graph': graph, 'initial': initial, 'cameras_dict': cameras_dict, 'frames_dict': frames_dict,
-                       'result': result, 'keyframes': key_frame}
-        all_bundles.append(bundle_dict)
-        pose_graph.add_bundle(bundle_dict)
-        print(f"Bundle {key_frame} added to the pose graph")
-
-    result = pose_graph.optimize()
-    pose_graph.save("/Users/mac/67604-SLAM-video-navigation/final_project/sift_p_graph")
-    bundles = load_bundles_list("/Users/mac/67604-SLAM-video-navigation/final_project/SIFT_BUNDLES")
-
-    initial_estimate = pose_graph.initial_estimate
-
-    print("done optimizing")
-    find_loops(pose_graph)
-    print("done finding loops")
-
-    plot_trajectory_over_all(db, result,initial_estimate)
-    Absolute_PnP_estimation_error(db)
-
-    plot_reprojection_error_vs_track_length(db, bundles, key_frames)
-    plt.show()
+    # pg, res = find_loops(data_list, db)
+    # pose_grpah_object.graph = pg
+    # pose_grpah_object.result = res
+    # pose_grpah_object.save("/Users/mac/67604-SLAM-video-navigation/final_project/sift_p_graph_with_LC")
+    # absolute_pg(result_with_lc, result_without_lc)
+    # plot_reprojection_error_vs_track_length(db, bundles, key_frames)
+    # plt.show()
     # run_analysis(db, bundles)

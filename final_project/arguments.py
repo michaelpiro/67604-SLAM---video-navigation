@@ -16,6 +16,7 @@ DATA_PATH = data_path
 DATA_HEAD = DATA_HEAD_MAC
 
 LEN_DATA_SET = len(os.listdir(DATA_PATH + 'image_0'))
-AKAZE_PATH = DATA_HEAD + "/docs/AKAZE"
+AKAZE_PATH = DATA_HEAD + "/docs/SIFT"
 SIFT_PATH = DATA_HEAD + "/docs/SIFT"
 GROUND_TRUTH_PATH = DATA_HEAD + "/dataset/poses/00.txt"
+SIFT_DB_PATH = "/Users/mac/67604-SLAM-video-navigation/final_project/SIFT_DB.pkl"
