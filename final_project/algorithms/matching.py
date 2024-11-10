@@ -70,3 +70,4 @@ def extract_inliers_outliers(kp_left, kp_right, matches):
 
 
 FEATURE, MATCHER_LEFT_RIGHT, MATCHER = get_sift_matcher_lr_matcher()
+# FEATURE, MATCHER_LEFT_RIGHT, MATCHER = get_akaze_matcher_lr_matcher()

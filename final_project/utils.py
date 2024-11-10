@@ -2,9 +2,10 @@ import os
 import cv2
 import numpy as np
 from final_project.arguments import *
+from final_project.arguments import DATA_PATH, LEN_DATA_SET
 MAC = True
 GROUND_TRUTH_PATH = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/dataset/poses/00.txt"
-LEN_DATA_SET = len(os.listdir(DATA_PATH + 'image_0'))
+
 
 def rodriguez_to_mat(rvec, tvec):
     rot, _ = cv2.Rodrigues(rvec)

@@ -4,7 +4,7 @@ from final_project import Inputs
 from final_project.algorithms.matching import (extract_kps_descs_matches, extract_inliers_outliers)
 from final_project.algorithms.ransac import ransac_pnp_for_tracking_db
 from final_project.algorithms.matching import MATCHER
-from final_project.arguments import LEN_DATA_SET, AKAZE_PATH
+from final_project.arguments import LEN_DATA_SET
 import numpy as np
 from final_project.backend.database.tracking_database import TrackingDB
 
@@ -27,8 +27,7 @@ def first_operation(db, frame_idx):
     return feature_prev, links_prev
 
 
-def create_db(path_to_sequence=r"VAN_ex/code/VAN_ex/dataset/sequences/00", start_frame=0, num_frames=200,
-              save_every=500, save_name="tracking_db", db=None):
+def create_db(start_frame=0, num_frames=200, db=None):
     """
     create a db
     :param path_to_sequence: the path to the sequence
@@ -46,16 +45,7 @@ def create_db(path_to_sequence=r"VAN_ex/code/VAN_ex/dataset/sequences/00", start
         db.add_frame(links=links_prev, left_features=feature_prev, matches_to_previous_left=None, inliers=None)
     else:
         start_loop = start_frame
-    last_frame_serialized = -1
     for i in tqdm(range(start_loop, num_frames)):
-        if i % save_every == 0 and (i != start_frame):
-            db_path = os.path.join(save_name, 'db', 'db_{}'.format(i))
-            # db.serialize(db_path)
-            # for j in range(save_every):
-            # frame_number = i - save_every + j
-            # frame_path = os.path.join(save_name, 'frames', 'frames')
-            # db.serialize_frame(frame_path, frame_number)
-            last_frame_serialized = i - 1
         feature_cur, links_cur = first_operation(db, i)
 
         prev_features = db.features(i - 1)
@@ -96,23 +86,21 @@ def create_db(path_to_sequence=r"VAN_ex/code/VAN_ex/dataset/sequences/00", start
 
         db.add_frame(links_cur, feature_cur, matches_l_l, in_prev_cur)
 
-    if last_frame_serialized != num_frames - 1:
-        db_path = os.path.join(save_name, 'db', 'db_{}'.format(num_frames - 1))
-        # db.serialize(db_path)
-
     return db
 
 
 def run(serialized_path):
     db = create_db(
-        start_frame=0,
         num_frames=LEN_DATA_SET,
-        save_name=serialized_path,
-        save_every=4000,
         db=None,
     )
     db.serialize(serialized_path)
     return db
 
 
-# run()
+# run("/Users/mac/67604-SLAM-video-navigation/final_project/AKAZE_DB")
+
+# create_db(
+#     num_frames=LEN_DATA_SET,
+#     db=None)
+

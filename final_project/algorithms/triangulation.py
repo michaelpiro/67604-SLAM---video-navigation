@@ -12,7 +12,6 @@ def linear_least_squares_triangulation(P, Q, kp_left, kp_right):
     :return: 3D point
     """
     A = np.zeros((4, 4))
-    # p_left, p_right = kp_left[inliers[ind].queryIdx], kp_right[inliers[ind].trainIdx]
     p_x, p_y = kp_left
     q_x, q_y = kp_right
     A[0] = P[2] * p_x - P[0]
@@ -28,8 +27,6 @@ def linear_least_squares_triangulation(P, Q, kp_left, kp_right):
 def triangulate_last_frame(tracking_db: TrackingDB, p, q, links=None):
     """
     Triangulate the matched points using OpenCV
-    :param inliers:
-    :return:
     """
     if links is None:
         links = tracking_db.all_last_frame_links()
@@ -44,8 +41,6 @@ def triangulate_last_frame(tracking_db: TrackingDB, p, q, links=None):
 def triangulate_links(links, p, q):
     """
     Triangulate the matched points using OpenCV
-    :param inliers:
-    :return:
     """
     x = np.zeros((len(links), 3))
     for i, link in enumerate(links):

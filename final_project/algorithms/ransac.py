@@ -23,8 +23,15 @@ def get_pixels_from_links(links):
     return pixels_first, pixels_second
 
 
-def transformation_agreement(T, traingulated_pts, prev_left_pix_values, prev_right_pix_values,
-                             ordered_cur_left_pix_values, ordered_cur_right_pix_values, x_condition=True):
+def transformation_agreement(T, traingulated_pts,
+                             ordered_cur_left_pix_values, ordered_cur_right_pix_values):
+    """
+    :param T: a transformation matrix to check
+    :param traingulated_pts: the world points from c0
+    :param ordered_cur_left_pix_values: pixel values of the left camera of c1
+    :param ordered_cur_right_pix_values: pixel values of the right camera of c1
+    :return: a list of the index that agrees with the transformation
+    """
     points_4d = np.hstack((traingulated_pts, np.ones((traingulated_pts.shape[0], 1)))).T
     l1_4d_projected = ((K @ T @ np.vstack((M1, np.array([0, 0, 0, 1])))) @ points_4d)[:3, :].T
     r1_4d_projected = ((K @ T @ np.vstack((M2, np.array([0, 0, 0, 1])))) @ points_4d)[:3, :].T
@@ -70,11 +77,8 @@ def ransac_pnp_for_tracking_db(matches_l_l, prev_links, cur_links, inliers_perce
 
     points_3d = triangulate_links(filtered_links_prev, P, Q)
 
-    prev_left_pix_values, prev_right_pix_values = get_pixels_from_links(filtered_links_prev)
     ordered_cur_left_pix_values, ordered_cur_right_pix_values = get_pixels_from_links(filtered_links_cur)
 
-    prev_left_pix_values = np.array(prev_left_pix_values)
-    prev_right_pix_values = np.array(prev_right_pix_values)
     ordered_cur_left_pix_values = np.array(ordered_cur_left_pix_values)
     ordered_cur_right_pix_values = np.array(ordered_cur_right_pix_values)
 
@@ -85,7 +89,6 @@ def ransac_pnp_for_tracking_db(matches_l_l, prev_links, cur_links, inliers_perce
     for i in range(ransac_iterations):
         random_idx = np.random.choice(len(points_3d), 4, replace=False)
         random_world_points = points_3d[random_idx]
-        # random_cur_l_pixels = np.array([(kp_l_cur[concensus_matches_cur_idx])[rand].pt for rand in random_idx])
         random_cur_l_pixels = ordered_cur_left_pix_values[random_idx]
         success, rotation_vector, translation_vector = cv2.solvePnP(random_world_points, random_cur_l_pixels, K,
                                                                     distCoeffs=diff_coeff, flags=cv2.SOLVEPNP_EPNP)
@@ -95,9 +98,8 @@ def ransac_pnp_for_tracking_db(matches_l_l, prev_links, cur_links, inliers_perce
         else:
             continue
 
-        points_agreed = transformation_agreement(T, points_3d, prev_left_pix_values, prev_right_pix_values,
-                                                 ordered_cur_left_pix_values, ordered_cur_right_pix_values,
-                                                 x_condition=False)
+        points_agreed = transformation_agreement(T, points_3d, ordered_cur_left_pix_values,
+                                                 ordered_cur_right_pix_values)
 
         num_inliers = np.sum(points_agreed)
         if num_inliers > best_inliers:
@@ -106,7 +108,7 @@ def ransac_pnp_for_tracking_db(matches_l_l, prev_links, cur_links, inliers_perce
     return best_matches_idx
 
 
-def ransac_pnp(matches_l_l, prev_links, cur_links):
+def ransac_pnp(matches_l_l, prev_links, cur_links, inliers_percent = 50):
     """
     Perform RANSAC to find the best pose transformation between two frames.
 
@@ -115,9 +117,8 @@ def ransac_pnp(matches_l_l, prev_links, cur_links):
     :param cur_links: Feature links from the current frame.
     :return: Relative pose, indices of best matches, and number of inliers.
     """
-    #TODO: CHANGE THE RANSAC ITERETAION
-    ransac_iterations = 10000  # Number of RANSAC iterations
-
+    # ransac_iterations = 10000  # Number of RANSAC iterations
+    ransac_iterations = calc_ransac_iteration(inliers_percent)
     filtered_links_cur = []
     filtered_links_prev = []
 
@@ -133,12 +134,9 @@ def ransac_pnp(matches_l_l, prev_links, cur_links):
     points_3d = triangulate_links(filtered_links_prev, P, Q)
 
     # Extract pixel coordinates from links
-    prev_left_pix_values, prev_right_pix_values = get_pixels_from_links(filtered_links_prev)
     ordered_cur_left_pix_values, ordered_cur_right_pix_values = get_pixels_from_links(filtered_links_cur)
 
     # Convert to NumPy arrays for processing
-    prev_left_pix_values = np.array(prev_left_pix_values)
-    prev_right_pix_values = np.array(prev_right_pix_values)
     ordered_cur_left_pix_values = np.array(ordered_cur_left_pix_values)
     ordered_cur_right_pix_values = np.array(ordered_cur_right_pix_values)
 
@@ -167,17 +165,13 @@ def ransac_pnp(matches_l_l, prev_links, cur_links):
             continue
 
         # Check agreement of transformation with all points
-        points_agreed = transformation_agreement(
-            T, points_3d, prev_left_pix_values, prev_right_pix_values,
-            ordered_cur_left_pix_values, ordered_cur_right_pix_values,
-            x_condition=False
-        )
+        points_agreed = transformation_agreement(T, points_3d, ordered_cur_left_pix_values,
+                                                 ordered_cur_right_pix_values)
 
         # Count the number of inliers
         num_inliers = np.sum(points_agreed)
         if num_inliers > best_inliers:
             best_inliers = num_inliers
-            best_T = T
             best_matches_idx = np.where(points_agreed == True)[0]
 
     # Recompute transformation using all inliers

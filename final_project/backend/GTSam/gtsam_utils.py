@@ -25,10 +25,13 @@ def load(base_filename):
 def T_B_from_T_A(T_A, T_B):
     """Calculate the relative transformation between two poses.
     more specifically, how b is seen from a."""
-    # if T_A.shape == (3, 4):
-    #     T_A = np.vstack((T_A, np.array([0, 0, 0, 1])))
+    if T_A.shape == (3, 4):
+        T_A = np.vstack((T_A, np.array([0, 0, 0, 1])))
+    if T_B.shape == (3, 4):
+        T_B = np.vstack((T_B, np.array([0, 0, 0, 1])))
 
-    return get_inverse(T_A) @ np.vstack((T_B, np.array([0, 0, 0, 1])))
+    # return get_inverse(T_A) @ T_B
+    return T_B @ get_inverse(T_A)
 
 
 def get_inverse(T):
@@ -225,9 +228,6 @@ def calculate_dist_traveled(transformations):
         dist = np.linalg.norm(loc)
         accumulate_distance.append(accumulate_distance[-1] + dist)
     return accumulate_distance
-
-
-
 
 
 def get_bundle_global_mat(result, global_transformation):

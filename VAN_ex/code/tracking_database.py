@@ -1,8 +1,9 @@
-import numpy as np
+import numpy
 import cv2
 import pickle
 from typing import List, Tuple, Dict, Sequence, Optional
 from timeit import default_timer as timer
+# import utils
 
 NO_ID = -1
 
@@ -19,10 +20,10 @@ class Link:
         self.y = y
 
     def left_keypoint(self):
-        return np.array([self.x_left, self.y])
+        return numpy.array([self.x_left, self.y])
 
     def right_keypoint(self):
-        return np.array([self.x_right, self.y])
+        return numpy.array([self.x_right, self.y])
 
     def __str__(self):
         return f'Link (xl={self.x_left}, xr={self.x_right}, y={self.y})'
@@ -76,7 +77,7 @@ class TrackingDB:
     last_trackId: int
     trackId_to_frames: Dict[int, List[int]]
     linkId_to_link: Dict[Tuple[int, int], Link]
-    frameId_to_lfeature: Dict[int, np.ndarray]
+    frameId_to_lfeature: Dict[int, numpy.ndarray]
     frameId_to_trackIds_list: Dict[int, List[int]]
     prev_frame_links: List[Link]
     leftover_links: Dict[int, List[Link]]
@@ -141,11 +142,11 @@ class TrackingDB:
         return range(self.frame_num())
 
     """ The feature array of (the left image of) frameId """
-    def features(self, frameId) -> Optional[np.ndarray]:
+    def features(self, frameId) -> Optional[numpy.ndarray]:
         return self.frameId_to_lfeature.get(frameId, None)
 
     """ The feature array of (the left image of) the last added frame """
-    def last_features(self) -> Optional[np.ndarray]:
+    def last_features(self) -> Optional[numpy.ndarray]:
         return self.frameId_to_lfeature.get(self.last_frameId, None)
 
     """ the link of trackId that sits on frameId """
@@ -221,11 +222,11 @@ class TrackingDB:
              If omitted treats all the matches as inliers.
     """
     @staticmethod
-    def create_links(features: np.ndarray,
+    def create_links(features: numpy.ndarray,
                      kp_left: Tuple[cv2.KeyPoint],
                      kp_right: Tuple[cv2.KeyPoint],
                      matches: Tuple[cv2.DMatch],
-                     inliers: List[bool] = None) -> Tuple[np.ndarray, List[Link]]:
+                     inliers: List[bool] = None) -> Tuple[numpy.ndarray, List[Link]]:
         assert features.shape[0] == len(kp_left)
         is_knn = type(matches[0]) is tuple
         inliers = TrackingDB.__all_inliers(inliers, len(matches))
@@ -271,7 +272,7 @@ class TrackingDB:
     """
     def add_frame(self,
                   links: List[Link],
-                  left_features: np.ndarray,
+                  left_features: numpy.ndarray,
                   matches_to_previous_left: Tuple[cv2.DMatch] = None,
                   inliers: List[bool] = None) -> int:
         feat_num = left_features.shape[0]
@@ -356,6 +357,8 @@ class TrackingDB:
     """ load TrackingDB to base_filename+'.pkl' file. """
     def load(self, base_filename):
         filename = base_filename + '.pkl'
+        import json
+
         with open(filename, 'rb') as file:
             data = pickle.load(file)
             self.last_frameId = data['last_frameId']
@@ -391,7 +394,7 @@ class TrackingDB:
     loading the file will only retrieve the frame data and not update the TrackingDB that holds this frame.
     """
     @staticmethod
-    def load_frame(base_filename: str, frameId: int) -> Tuple[np.ndarray, List[Link]]:
+    def load_frame(base_filename: str, frameId: int) -> Tuple[numpy.ndarray, List[Link]]:
         filename = base_filename + '_{:06d}.pkl'.format(frameId)
         with open(filename, 'rb') as file:
             data = pickle.load(file)

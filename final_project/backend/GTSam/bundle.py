@@ -1,27 +1,20 @@
 import os
 import gtsam
-import matplotlib.pyplot as plt
 import numpy as np
 import cv2
 
-from typing import List, Tuple, Dict, Sequence, Optional
-
 import final_project.arguments as arguments
 
-import random
 from final_project.backend.database.tracking_database import TrackingDB
-from final_project.utils import K, M2, M1, P, Q, rodriguez_to_mat, read_extrinsic_matrices, read_images
+from final_project.utils import K, M2, M1, P, Q, rodriguez_to_mat, read_extrinsic_matrices
 from final_project.algorithms.triangulation import triangulate_last_frame
 from final_project.backend.GTSam.gtsam_utils import get_inverse, get_factor_point, get_factor_symbols
-from gtsam.utils.plot import plot_trajectory, plot_3d_points, set_axes_equal
+from final_project.arguments import *
 
 BASE_LINE_SIGN = -1
 
-# DATA_PATH = r'C:\Users\elyas\University\SLAM video navigation\VAN_ex\code\VAN_ex\dataset\sequences\00\\'
-DATA_PATH = arguments.DATA_PATH
-LEN_DATA_SET = len(os.listdir(DATA_PATH + 'image_0'))
-TRANSFORMATIONS_PATH = 'transformations_ex3.npy'
-POSE_SIGMA = gtsam.noiseModel.Diagonal.Sigmas(np.array([1, 1, 1, 1, 1, 1])*1)
+TRANSFORMATIONS_FILE_NAME = 'transformations_ex3.npy'
+POSE_SIGMA = gtsam.noiseModel.Diagonal.Sigmas(np.array([1, 1, 1, 1, 1, 1]) * 1)
 K_OBJECT = gtsam.Cal3_S2Stereo(K[0, 0], K[1, 1], K[0, 1], K[0, 2], K[1, 2], BASE_LINE_SIGN * M2[0, 3])
 
 
@@ -64,7 +57,6 @@ def get_bundles_rel_Ts(db: TrackingDB, first_frame_idx, last_frame_idx):
 
         links_first_frame = np.array(links_first_frame)
         img_points = np.array([(link.x_left, link.y) for link in links_first_frame])
-        # links_current_frame = np.array(links_current_frame)
         success, rotation_vector, translation_vector = cv2.solvePnP(triangulated_links, img_points, K,
                                                                     distCoeffs=diff_coeff, flags=cv2.SOLVEPNP_EPNP)
 
@@ -87,7 +79,6 @@ def create_single_bundle(first_frame_idx, last_frame_idx, db):
 
     # calculate the relative transformations
     relative_transformations = get_bundles_rel_Ts(db, first_frame_idx, last_frame_idx)
-    # pose_sigma = gtsam.noiseModel.Diagonal.Sigmas(np.array([0.01, 0.01, 0.01, 0.01, 0.01, 0.01]))
 
     # add the cameras poses to the graph
     for i in range(last_frame_idx + 1 - first_frame_idx):
@@ -148,8 +139,6 @@ def create_single_bundle(first_frame_idx, last_frame_idx, db):
                     initial_estimate.insert(location_symbol, reference_triangulated_point)
 
                 # Create the factor
-                # n = np.array([0.1, 0.1, 0.5])*(track_last_frame-frame_id+1) + np.array([1, 1, 1])
-                # sigma = gtsam.noiseModel.Diagonal.Sigmas(n)
                 sigma = gtsam.noiseModel.Isotropic.Sigma(3, 0.1)
                 graph.add(
                     gtsam.GenericStereoFactor3D(gtsam.StereoPoint2(link.x_left, link.x_right, link.y), sigma,
@@ -158,7 +147,6 @@ def create_single_bundle(first_frame_idx, last_frame_idx, db):
                                                 K_OBJECT))
 
     return graph, initial_estimate, camera_symbols, gtsam_frames
-
 
 
 def get_negative_z_points(result, graph):
@@ -171,8 +159,7 @@ def get_negative_z_points(result, graph):
         factor = graph.at(i)
         if isinstance(factor, gtsam.GenericStereoFactor3D):
             point = get_factor_point(factor, result)
-            # print(point)
-            if point[2] < 0 or point[2] > 1000:
+            if point[2] < 0 or point[2] > 2000:
                 camera_symbol, track_symbol = get_factor_symbols(factor)
                 values_to_remove.append(track_symbol)
                 factors_to_remove.append(i)
@@ -192,7 +179,6 @@ def optimize_graph(graph, initial):
     Remove points with negative z values from the graph and the result after optimization until there are no such points."""
     optimizer = gtsam.LevenbergMarquardtOptimizer(graph, initial)
     result = optimizer.optimize()
-    # return graph, result
     result, new_graph, removed = get_negative_z_points(result, graph)
     if removed:
         print("the results keys before filtering", len(result.keys()))
@@ -205,32 +191,17 @@ def optimize_graph(graph, initial):
 
 def calc_locations_angle(t1, t2):
     """ Calculate the angle between two cameras in the x-y plane for keyframe selection"""
-    # cam1_rotation = t1[:3, :3]
-    # cam1_translation = t1[:3, 3]
-    # cam1_position = -cam1_rotation.T @ cam1_translation
-    # cam1_position = cam1_position[:2]
-    #
-    # cam2_rotation = t2[:3, :3]
-    # cam2_translation = t2[:3, 3]
-    # cam2_position = -cam2_rotation.T @ cam2_translation
-    # cam2_position = cam2_position[:2]
-    # x = max(np.abs(cam2_position[1] - cam1_position[1]), np.abs(cam2_position[0] - cam1_position[0]))
-    # y = min(np.abs(cam2_position[1] - cam1_position[1]), np.abs(cam2_position[0] - cam1_position[0]))
-    # angle = np.arctan2(y, x)
-    # angle = np.arctan2(np.abs(cam2_position[1] - cam1_position[1]), np.abs(cam2_position[0] - cam1_position[0]))
     if t1.shape[0] != t1.shape[1]:
         t1 = np.vstack((t1, np.array([0, 0, 0, 1])))
     if t2.shape[0] != t2.shape[1]:
         t2 = np.vstack((t2, np.array([0, 0, 0, 1])))
 
     R = cv2.Rodrigues(t1[:3, :3] @ t2[:3, :3].T)[0]
-    angle = np.linalg.norm(R)*180/np.pi
+    angle = np.linalg.norm(R) * 180 / np.pi
 
     return angle
 
 
-
-# TODO: CHECK THIS FUNCTION! IF IT IS WORKING CORRECTLY
 def extract_keyframes(db: TrackingDB, transformations):
     """ Extract keyframes from the database"""
     keyFrames = []  # all keyframes start with zero
@@ -246,11 +217,8 @@ def extract_keyframes(db: TrackingDB, transformations):
 
     while i < num_frames - 1:
         t_initial = transformations[i]
-        t1 = t_initial
         old_tracks = set(db.tracks(i))
         start = min(i + minimum_gap, num_frames - 1)
-        dist = 0
-        # accumalate_angle = 0
         for j in range(start, min(i + max_gap, num_frames)):
             t2 = transformations[j]
             dist = calculate_distance_between_keyframes(t_initial, t2)
@@ -259,8 +227,6 @@ def extract_keyframes(db: TrackingDB, transformations):
             tracks_ratio = len(common_tracks) / len(old_tracks)
             old_tracks = new_tracks
             angle = calc_locations_angle(t_initial, t2)
-            t1 = t2
-            # print(f"angle {accumalate_angle} dist {dist} common tracks {len(common_tracks)}, frame {j}, i {i}")
 
             if tracks_ratio < track_losing_factor or j == i + max_gap - 1 \
                     or j == num_frames - 1 or dist > max_dist or angle > theta_max:
@@ -271,8 +237,6 @@ def extract_keyframes(db: TrackingDB, transformations):
         # Update i to j+1 if no keyframe was added in the inner loop
         if j == min(i + max_gap - 1, num_frames - 1):
             i = j + 1
-
-    print(f"key frames {keyFrames}")
 
     return keyFrames
 
@@ -311,9 +275,7 @@ def get_all_bundles(db):
         bundles[i] = {'graph': graph, 'initial': initial, 'cameras_dict': cameras_dict, 'frames_dict': frames_dict,
                       'result': result, 'keyframes': key_frames}
 
-        bundle_legnth = key_frames[1] - key_frames[0]
         last_camera_symbol = cameras_dict[key_frames[1]]
-        sym = gtsam.DefaultKeyFormatter(last_camera_symbol)
 
         final_cam_trans = result.atPose3(last_camera_symbol).translation()
         final_cam_rot = result.atPose3(last_camera_symbol).rotation().matrix().T
@@ -335,32 +297,3 @@ def get_all_bundles(db):
 
     return bundles
 
-
-
-
-# class Bundle:
-
-# if __name__ == '__main__':
-#     algorithm = 'akaze'
-    #
-    # ORB_PATH = arguments.DATA_HEAD + "docs/ORB/db/db_3359"
-    # AKAZE_PATH = arguments.DATA_HEAD + "/docs/AKAZE/db/db_3359"
-    # SIFT_PATH = arguments.DATA_HEAD + "/docs/SIFT/db/db_3359"
-    # path = r"C:\Users\elyas\University\SLAM video navigation\VAN_ex\code\VAN_ex\dataset\sequences\00"
-    # if algorithm == 'orb':
-    #     serialized_path = ORB_PATH
-    # elif algorithm == 'akaze':
-    #     serialized_path = AKAZE_PATH
-    # elif algorithm == 'sift':
-    #     serialized_path = SIFT_PATH
-    # else:
-    #     raise ValueError("algorithm should be one of ['orb', 'akaze', 'sift']")
-    #
-    # db = TrackingDB()
-    # db.load(serialized_path)
-    # q_5_1(db)
-    # plt.show()
-    # q_5_3(db)
-    # plt.show()
-    # q_5_4(db)
-    # plt.show()

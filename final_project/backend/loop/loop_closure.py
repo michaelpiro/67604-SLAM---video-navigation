@@ -24,7 +24,7 @@ from final_project import arguments
 from final_project.Inputs import read_extrinsic_matrices, read_images
 from final_project.algorithms.ransac import get_pixels_from_links, transformation_agreement
 from final_project.algorithms.triangulation import triangulate_links
-from final_project.arguments import SIFT_DB_PATH
+from final_project.arguments import SIFT_DB_PATH, AKAZE_DB_PATH
 from final_project.backend.GTSam import bundle
 from final_project.backend.GTSam.bundle import K_OBJECT, optimize_graph
 from final_project.backend.GTSam.gtsam_utils import get_inverse, save
@@ -34,13 +34,12 @@ from final_project.backend.loop.graph import Graph
 from final_project.utils import P, Q, K, rodriguez_to_mat
 from final_project.algorithms.matching import MATCHER, MATCHER_LEFT_RIGHT
 
-
 # MATCHER = cv2.BFMatcher(normType=cv2.NORM_HAMMING, crossCheck=False)
 
 # Threshold constants for Mahalanobis distance and inliers
-MAHALANOBIS_THRESHOLD = 2700
+MAHALANOBIS_THRESHOLD = 2500
 INLIERS_THRESHOLD = 130
-FAR_MAHALANOBIS_THRESHOLD = MAHALANOBIS_THRESHOLD * 7
+FAR_MAHALANOBIS_THRESHOLD = MAHALANOBIS_THRESHOLD * 6
 
 # Symbols used for locations and cameras in the pose graph
 LOCATION_SYMBOL = 'l'
@@ -51,7 +50,7 @@ relative_covariance_dict = dict()
 cov_dijkstra_graph = Graph()
 
 # Path to the serialized tracking database
-PATH_TO_DB = serialized_path = arguments.DATA_HEAD + "/docs/AKAZE/db/db_3359"
+PATH_TO_DB = AKAZE_DB_PATH
 
 # Initial pose (identity rotation and zero translation)
 P0 = gtsam.Pose3(gtsam.Rot3(np.eye(3)), gtsam.Point3(np.zeros(3)))
@@ -67,14 +66,6 @@ def get_tracking_database(path_do_db_file=PATH_TO_DB):
     tracking_db = TrackingDB()
     tracking_db.load(path_do_db_file)
     return tracking_db
-
-
-# Load the tracking database
-db = get_tracking_database(PATH_TO_DB)
-
-
-# from ex4_v2 import calc_ransac_iteration, triangulate_links, get_pixels_from_links, P, Q
-# from ex6 import calculate_relative_pose_cov
 
 
 def update_pose_graph(pose_grpah, result, relative_pose, relative_cov, start_frame, end_frame):
@@ -402,7 +393,7 @@ def q_7_5_6(marginals, result_without_closure, pose_graph_without_closure):
 
 
 # def find_loops(pose_graph: PoseGraph):
-def find_loops(data,db):
+def find_loops(pose_graph, db):
     """
     Detect and insert loop closures into the pose graph.
 
@@ -411,8 +402,8 @@ def find_loops(data,db):
     """
     # pg = pose_graph.graph
     # result = pose_graph.result
-    pg = data[0]
-    result = data[1]
+    pg = pose_graph.graph
+    result = pose_graph.result
     if result is None:
         raise ValueError('No result found in the pose graph.')
     marginals = gtsam.Marginals(pg, result)
@@ -440,7 +431,7 @@ def find_loops(data,db):
                 familiar_path = True
                 # Insert the loop closure into the pose graph
                 pg, result = insert_to_pose_graph(camera_number, best_candidate,
-                                                  matches, pg, result)
+                                                  matches, pg, result,db)
                 print(f"loop detected between camera {camera_number} and camera {best_candidate}")
         else:
             if len(frames_in_familiar_path) > 0:
@@ -450,7 +441,7 @@ def find_loops(data,db):
                     if best_candidate is not None:
                         # Insert the loop closure into the pose graph
                         pg, result = insert_to_pose_graph(camera_number, best_candidate,
-                                                          matches, pg, result)
+                                                          matches, pg, result,db)
                         print(
                             f"end of familiar segment, loop closure between camera {camera_number} "
                             f"and camera {best_candidate}"
@@ -458,10 +449,9 @@ def find_loops(data,db):
                         break
                 familiar_path = False
                 frames_in_familiar_path = []
-    # pose_graph.graph = pg
-    # pose_graph.result = result
-    # return pose_graph
-    return pg, result
+    pose_graph.graph = pg
+    pose_graph.result = result
+    return pose_graph
 
 
 def plot_graph_along(camera_number, pose_graph, result):
@@ -478,7 +468,7 @@ def plot_graph_along(camera_number, pose_graph, result):
                           f" camera {camera_number}, Q_7_5_4")
 
 
-def insert_to_pose_graph(camera_number, best_candidate, matches, pose_graph, result):
+def insert_to_pose_graph(camera_number, best_candidate, matches, pose_graph, result,db):
     """
     Insert a loop closure between two camera frames into the pose graph.
 
@@ -491,24 +481,22 @@ def insert_to_pose_graph(camera_number, best_candidate, matches, pose_graph, res
     """
     # Compute relative pose and covariance between the two frames
     # try:
-    rel_pose_new, rel_cov_new = get_relative_pose_and_cov(camera_number, best_candidate, pose_graph, result, matches, db)
+    rel_pose_new, rel_cov_new = get_relative_pose_and_cov(camera_number, best_candidate, pose_graph, result, matches,
+                                                          db)
 
-    index_list = get_index_list(result)
-    old_camera_index = index_list.index(camera_number)
-    camera_before = index_list[old_camera_index - 1]
-    rel_pose_old, rel_cov_old = get_relative_pose_and_cov(camera_before, camera_number, pose_graph, result, matches, db)
-
+    # index_list = get_index_list(result)
+    # old_camera_index = index_list.index(camera_number)
+    # camera_before = index_list[old_camera_index - 1]
+    # rel_pose_old, rel_cov_old = get_relative_pose_and_cov(camera_before, camera_number, pose_graph, result, matches, db)
 
     # except Exception as e:
     #     print(f"bad point!!!!!!!!!!!!!!!! {result.atPoint3(7782220156096217146)}")
     #     return pose_graph, result
 
-
     # Add the relative pose to the pose graph and optimize
     pose_graph, result = update_pose_graph(pose_graph, result, rel_pose_new, rel_cov_new, camera_number, best_candidate)
 
     # Plot the updated graph
-    # plot_graph_along(camera_number, pose_graph, result)
 
     return pose_graph, result
 
@@ -582,11 +570,8 @@ def ransac_pnp(matches_l_l, prev_links, cur_links):
             continue
 
         # Check agreement of transformation with all points
-        points_agreed = transformation_agreement(
-            T, points_3d, prev_left_pix_values, prev_right_pix_values,
-            ordered_cur_left_pix_values, ordered_cur_right_pix_values,
-            x_condition=False
-        )
+        points_agreed = transformation_agreement(T, points_3d, ordered_cur_left_pix_values,
+                                                 ordered_cur_right_pix_values)
 
         # Count the number of inliers
         num_inliers = np.sum(points_agreed)
@@ -816,7 +801,7 @@ def get_camera_location_from_gtsam(pose: gtsam.Pose3):
     return pose.translation()
 
 
-def plot_matches(first_frame, second_frame):
+def plot_matches(first_frame, second_frame,db):
     """
     Visualize inlier and outlier feature matches between two camera frames.
 
@@ -824,7 +809,7 @@ def plot_matches(first_frame, second_frame):
     :param second_frame: Index of the second camera frame.
     """
     # Retrieve inlier matches
-    inliers,_ = check_candidate_match(first_frame, second_frame, db)
+    inliers, _ = check_candidate_match(first_frame, second_frame, db)
     query_idx_list = [match.queryIdx for match in inliers]
 
     # Retrieve all matches and identify outliers
@@ -1129,7 +1114,7 @@ def q_7_5(pose_graph, result, data):
     plt.show()
 
     # Visualize feature matches between specific frames
-    plot_matches(1488, 42)
+    plot_matches(1488, 42, db)
 
     # Plot 2D trajectories compared to ground truth
     plot_trajectory2D_ground_truth(result_without_closure, "without closure, q7_5_4")
@@ -1145,31 +1130,52 @@ def q_7_5(pose_graph, result, data):
 
 # init_dijksra_graph_relative_covariance_dict(data_list[1], data_list[0], relative_covariance_dict,
 #                                             cov_dijkstra_graph)
-# if __name__ == '__main__':
-#
-#     # Load the initial pose graph and result from a serialized file
-#
-#     db = get_tracking_database("/Users/mac/67604-SLAM-video-navigation/final_project/SIFT_DB")
-#
-#     key_frames = bundle.get_keyframes(db)
-#     # pose_graph = PoseGraph()
-#     # all_bundles = []
-#     # for key_frame in key_frames:
-#     #     first_frame = key_frame[0]
-#     #     last_frame = key_frame[1]
-#     #     graph, initial, cameras_dict, frames_dict = bundle.create_single_bundle(key_frame[0], key_frame[1], db)
-#     #     graph, result = bundle.optimize_graph(graph, initial)
-#     #     # print(f"bad point {result.atPoint3(bad_symbol)}")
-#     #
-#     #     bundle_dict = {'graph': graph, 'initial': initial, 'cameras_dict': cameras_dict, 'frames_dict': frames_dict,
-#     #                    'result': result, 'keyframes': key_frame}
-#     #     all_bundles.append(bundle_dict)
-#     #     pose_graph.add_bundle(bundle_dict)
-#     #     print(f"Bundle {key_frame} added to the pose graph")
-#     # save(all_bundles,"/Users/mac/67604-SLAM-video-navigation/final_project/SIFT_BUNDLES")
-#     # pose_graph.save("/Users/mac/67604-SLAM-video-navigation/final_project/sift_p_graph_no_lc")
-#     # pose_graph.optimize()
-#     # pose_graph.save("/Users/mac/67604-SLAM-video-navigation/final_project/sift_p_graph_no_lc")
+if __name__ == '__main__':
+
+    # Load the initial pose graph and result from a serialized file
+
+    # db = get_tracking_database("/Users/mac/67604-SLAM-video-navigation/final_project/AKAZE_DB")
+
+    db = TrackingDB()
+    db.load("/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/AKAZE")
+    key_frames = bundle.get_keyframes(db)
+    pose_graph = PoseGraph()
+    pose_graph_no_lc = PoseGraph()
+    all_bundles = []
+    for key_frame in key_frames:
+        first_frame = key_frame[0]
+        last_frame = key_frame[1]
+        graph, initial, cameras_dict, frames_dict = bundle.create_single_bundle(key_frame[0], key_frame[1], db)
+        graph, result = bundle.optimize_graph(graph, initial)
+        # print(f"bad point {result.atPoint3(bad_symbol)}")
+
+        bundle_dict = {'graph': graph, 'initial': initial, 'cameras_dict': cameras_dict, 'frames_dict': frames_dict,
+                       'result': result, 'keyframes': key_frame}
+        all_bundles.append(bundle_dict)
+        pose_graph.add_bundle(bundle_dict)
+        pose_graph_no_lc.add_bundle(bundle_dict)
+        print(f"Bundle {key_frame} added to the pose graph")
+    # save(all_bundles, "/Users/mac/67604-SLAM-video-navigation/final_project/AKAZE_BUNDLE_NEW")
+    # pose_graph.save("/Users/mac/67604-SLAM-video-navigation/final_project/AKAZE_POSE_GRAPH_NEW")
+    pose_graph.optimize()
+    pose_graph_no_lc.optimize()
+    find_loops(pose_graph, db)
+    # pose_graph.save("/Users/mac/67604-SLAM-video-navigation/final_project/AKAZE_POSE_GRAPH_LC_NEW")
+    # pose_graph_no_lc = PoseGraph.load("/Users/mac/67604-SLAM-video-navigation/final_project/AKAZE_POSE_GRAPH_NEW")
+    # pose_graph_no_lc.optimize()
+    marginals = gtsam.Marginals(pose_graph.graph, pose_graph.result)
+    q_7_5_6(marginals, pose_graph_no_lc.result, pose_graph_no_lc.graph)
+
+    pose_graph_lc = PoseGraph.load("/Users/mac/67604-SLAM-video-navigation/final_project/AKAZE_POSE_GRAPH_LC_NEW")
+
+
+    # pose_graph_no_lc = PoseGraph.load("/Users/mac/67604-SLAM-video-navigation/final_project/AKAZE_POSE_GRAPH_NEW")
+    # pose_graph_no_lc.optimize()
+    plot_pose_graphs_XZ_ground_truth(pose_graph_lc.result, pose_graph_no_lc.result, pose_graph_lc.graph, pose_graph_no_lc.graph)
+    plt.show()
+
+
+    # pose_graph.save("/Users/mac/67604-SLAM-video-navigation/final_project/sift_p_graph_no_lc")
 #     pose_graph = PoseGraph.load("/Users/mac/67604-SLAM-video-navigation/final_project/sift_p_graph_no_lc")
 #
 #     # Initialize the relative covariance dictionary and Dijkstra graph
