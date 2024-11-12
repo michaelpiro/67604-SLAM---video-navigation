@@ -3,7 +3,6 @@ import cv2
 import pickle
 from typing import List, Tuple, Dict, Sequence, Optional
 from timeit import default_timer as timer
-import final_project.utils as utils
 
 
 NO_ID = -1
