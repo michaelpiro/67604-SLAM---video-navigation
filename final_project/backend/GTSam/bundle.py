@@ -155,13 +155,7 @@ def create_single_bundle(first_frame_idx, last_frame_idx, db):
                                                      location_symbol,
                                                      K_OBJECT)
 
-
-                # print(f"track id: {track_id}, camera: {frame_id} factor error: {factor.error(initial_estimate)}")
-                # error = factor.error(initial_estimate)
                 graph.add(factor)
-                # if error > 20000:
-                    # initial_estimate.
-                    # visualize_track(db, track_id)
 
     return graph, initial_estimate, camera_symbols, gtsam_frames
 
@@ -184,7 +178,6 @@ def get_negative_z_points(result, graph):
                 new_graph.add(factor)
         else:
             new_graph.add(factor)
-            # print(f"factor error {factor.error(result)}")
 
     values_to_remove = list(set(values_to_remove))
     for value_to_remove in values_to_remove:
@@ -198,8 +191,8 @@ def optimize_graph(graph, initial):
     optimizer = gtsam.LevenbergMarquardtOptimizer(graph, initial)
     result = optimizer.optimize()
     result, new_graph, removed = get_negative_z_points(result, graph)
-    if removed:
-        print("the results keys before filtering", len(result.keys()))
+    # if removed:
+    #     print("the results keys before filtering", len(result.keys()))
     while removed:
         optimizer = gtsam.LevenbergMarquardtOptimizer(new_graph, result)
         result = optimizer.optimize()

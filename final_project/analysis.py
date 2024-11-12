@@ -22,6 +22,8 @@ from final_project.backend.loop.loop_closure import find_loops, get_locations_gr
     plot_trajectory2D_ground_truth, init_dijksra_graph_relative_covariance_dict, get_relative_covariance, \
     cov_dijkstra_graph
 
+
+
 SUBSET_FACTOR = 0.5
 
 ####################################################################################################
@@ -320,16 +322,6 @@ def plot_reprojection_error_vs_track_length(tracking_db: TrackingDB, bundles, ke
             subset_tracks += y
         return subset_tracks
 
-    def read_kth_camera(k):
-        filename = '/Users/mac/67604-SLAM-video-navigation/VAN_ex/dataset/poses/00.txt'
-        with open(filename, 'r') as file:
-            for current_line_number, line in enumerate(file, start=0):
-                if current_line_number == k:
-                    camera = line.strip()
-                    break
-        numbers = list(map(float, camera.split()))
-        matrix = np.array(numbers).reshape(3, 4)
-        return matrix
 
     def plot_reprojection_errors(reprojection_errors: Dict[int, Tuple[float, float]], title=None):
         the_frames = sorted(reprojection_errors.keys())
@@ -410,8 +402,9 @@ def plot_reprojection_error_vs_track_length(tracking_db: TrackingDB, bundles, ke
 import cv2
 import numpy as np
 
-from final_project.Inputs import read_extrinsic_matrices
-from final_project.arguments import LEN_DATA_SET, SIFT_DB_PATH, GROUND_TRUTH_PATH
+from final_project.Inputs import read_extrinsic_matrices, read_kth_camera
+from final_project.arguments import LEN_DATA_SET, SIFT_DB_PATH, GROUND_TRUTH_PATH, TRANSFORMATIONS_NPY, \
+    PNP_GLOBAL_T_PATH
 from final_project.backend.GTSam.gtsam_utils import get_locations_from_gtsam
 from final_project.backend.database.tracking_database import TrackingDB
 from final_project.backend.GTSam.gtsam_utils import calculate_relative_transformation
@@ -675,9 +668,9 @@ def plot_relative_error_consequtive_kf(bundles: Dict, db: TrackingDB):
         return c2 @ np.linalg.inv(c1)
 
     gt = read_extrinsic_matrices(GROUND_TRUTH_PATH, LEN_DATA_SET)
-    # pnp_transformations = calculate_global_transformation(db, 1, LEN_DATA_SET)
-    # np.save("/Users/mac/67604-SLAM-video-navigation/final_project/pnp_global_transformations.npy", pnp_transformations)
-    pnp_transformations = np.load("/Users/mac/67604-SLAM-video-navigation/final_project/pnp_global_transformations.npy")
+    pnp_transformations = calculate_global_transformation(db, 1, LEN_DATA_SET)
+    np.save(PNP_GLOBAL_T_PATH, pnp_transformations)
+    pnp_transformations = np.load(TRANSFORMATIONS_NPY)
     bundles_list = [bundles[i] for i in range(len(bundles))]
     gt_rel = list()
     bundle_rel = list()
@@ -728,8 +721,10 @@ def plot_relative_error_consequtive_kf(bundles: Dict, db: TrackingDB):
     bundle_rel = np.array(bundle_rel)
     pnp_rel = np.array(pnp_rel)
 
-    np.save("/Users/mac/67604-SLAM-video-navigation/final_project/bundle_rel.npy", bundle_rel)
-    np.save("/Users/mac/67604-SLAM-video-navigation/final_project/pnp_rel.npy", pnp_rel)
+    # np.save("/Users/mac/67604-SLAM-video-navigation/final_project/bundle_rel.npy", bundle_rel)
+    # np.save("/Users/mac/67604-SLAM-video-navigation/final_project/pnp_rel.npy", pnp_rel)
+
+
     # pnp_norm_err = calculate_norm_error(pnp_rel, gt_rel)
     # bundle_norm_err = calculate_norm_error(bundle_rel, gt_rel)
     # pnp_deg_err = calculate_error_deg(pnp_rel, gt_rel)
@@ -791,9 +786,9 @@ def rel_pnp_seq_err(db):
 
     sub_section_length = [100, 400, 800]
     gt = read_extrinsic_matrices(GROUND_TRUTH_PATH, LEN_DATA_SET)
-    # pnp_global_trans = calculate_relative_transformation(db, 1, LEN_DATA_SET)
-    pnp_global_trans = np.load("/Users/mac/67604-SLAM-video-navigation/final_project/pnp_global_transformations.npy")
-    # pnp_global_trans = [pnp_global_trans[i] for i in range(len(pnp_global_trans))]
+    pnp_global_trans = calculate_relative_transformation(db, 1, LEN_DATA_SET)
+    # pnp_global_trans = np.load(PNP_GLOBAL_T_PATH)
+    pnp_global_trans = [pnp_global_trans[i] for i in range(len(pnp_global_trans))]
     accumulate_distance = calculate_dist_traveled(gt)
     # plt.figure()
     all_norm_err = list()
@@ -939,7 +934,7 @@ def rel_bundle_seq_err(bundles_list: List):
     accumulate_distance = calculate_dist_traveled(gt)
     all_key_frames_list = [0] + [bundle["keyframes"][-1] for bundle in bundles_list]
     global_bundle_transformation = calculate_bundles_global_transformation(bundles_list)
-    global_bundle_transformation = np.load("/Users/mac/67604-SLAM-video-navigation/final_project/bundles_global_t.npy")
+    # global_bundle_transformation = np.load("/Users/mac/67604-SLAM-video-navigation/final_project/bundles_global_t.npy")
     all_norm_err = list()
     all_deg_err = list()
     all_x_axis = list()

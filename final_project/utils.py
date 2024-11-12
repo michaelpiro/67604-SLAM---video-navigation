@@ -10,7 +10,7 @@ from final_project.arguments import DATA_PATH, LEN_DATA_SET
 from final_project.backend.database.tracking_database import TrackingDB
 
 MAC = True
-GROUND_TRUTH_PATH = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/dataset/poses/00.txt"
+
 
 
 def rodriguez_to_mat(rvec, tvec):

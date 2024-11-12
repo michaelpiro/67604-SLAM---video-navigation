@@ -88,12 +88,13 @@ def get_pose_covariance(bundle, values):
     # marginals.jointMarginalCovariance(keys).fullMatrix()
 
 
+
 def calculate_relative_transformation(db: TrackingDB, first_frame_idx, last_frame_idx):
     """Calculate the realtive transformations between the first and every frame between
         the first and the last frame."""
     transformations = dict()
     transformations[0] = np.vstack((M1, np.array([0, 0, 0, 1])))
-    diff_coeff = np.zeros((5, 1))
+    # diff_coeff = np.zeros((5, 1))
     for i in range(1, last_frame_idx - first_frame_idx + 1):
         T = calc_rel_T(db, i)
         if T is None:
