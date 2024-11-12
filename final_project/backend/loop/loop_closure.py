@@ -1,5 +1,7 @@
 import math
 import pickle
+import time
+
 from tqdm import tqdm
 
 import gtsam
@@ -37,9 +39,11 @@ from final_project.algorithms.matching import MATCHER, MATCHER_LEFT_RIGHT
 # MATCHER = cv2.BFMatcher(normType=cv2.NORM_HAMMING, crossCheck=False)
 
 # Threshold constants for Mahalanobis distance and inliers
-MAHALANOBIS_THRESHOLD = 2500
-INLIERS_THRESHOLD = 130
-FAR_MAHALANOBIS_THRESHOLD = MAHALANOBIS_THRESHOLD * 6
+MAHALANOBIS_THRESHOLD = 200
+INLIERS_THRESHOLD = 120
+FAR_MAHALANOBIS_THRESHOLD = MAHALANOBIS_THRESHOLD * 7
+MAX_CANDIDATES = 15
+
 
 # Symbols used for locations and cameras in the pose graph
 LOCATION_SYMBOL = 'l'
@@ -47,7 +51,24 @@ CAMERA_SYMBOL = 'c'
 
 # Dictionary to store relative covariances and initialize a Dijkstra graph for covariance paths
 relative_covariance_dict = dict()
+new_edges = []
+
 cov_dijkstra_graph = Graph()
+
+def load(base_filename):
+    """
+    Load serialized data from a pickle file.
+
+    :param base_filename: Base filename without extension.
+    :return: Loaded data object.
+    """
+    filename = base_filename + '.pkl'
+    with open(filename, 'rb') as file:
+        data = pickle.load(file)
+    print('Bundles loaded from', filename)
+    return data
+# cov_dijkstra_graph = load("cov_dijkstra_graph")
+# relative_covariance_dict = load("relative_covariance_dict")
 
 # Path to the serialized tracking database
 PATH_TO_DB = AKAZE_DB_PATH
@@ -95,9 +116,9 @@ def update_pose_graph(pose_grpah, result, relative_pose, relative_cov, start_fra
     first_global_pose = result.atPose3(start_frame_symbol)
     global_pose = first_global_pose.transformPoseFrom(relative_pose)
 
-    # Update the result with the new global pose
-    result.erase(end_frame_symbol)
-    result.insert(end_frame_symbol, global_pose)
+    # # Update the result with the new global pose
+    # result.erase(end_frame_symbol)
+    # result.insert(end_frame_symbol, global_pose)
 
     # Optimize the pose graph using Levenberg-Marquardt optimizer
     optimizer = gtsam.LevenbergMarquardtOptimizer(pose_grpah, result)
@@ -107,6 +128,7 @@ def update_pose_graph(pose_grpah, result, relative_pose, relative_cov, start_fra
     cov_dijkstra_graph.add_edge(start_frame, end_frame, relative_cov)
 
     return pose_grpah, new_result
+
 
 
 def get_relative_consecutive_covariance(c1, c2, marginals):
@@ -134,6 +156,7 @@ def get_relative_consecutive_covariance(c1, c2, marginals):
     if c2_number in relative_covariance_dict:
         return relative_covariance_dict[c2_number]
 
+
     # Compute the relative covariance using joint marginal information
     keys = gtsam.KeyVector()
     keys.append(c1)
@@ -152,6 +175,47 @@ def get_relative_covariance(index_list, marginals):
     :param marginals: Marginals object containing covariance information.
     :return: Cumulative covariance matrix.
     """
+    cov = None
+    if len(index_list) == 1:
+        c = gtsam.symbol('c', index_list[0])
+        cov = marginals.marginalCovariance(c)
+        return cov
+    for i in range(len(index_list) - 1):
+        edge = (index_list[i], index_list[i + 1])
+        if str(edge) in relative_covariance_dict:
+            c_n_giving_c_i = relative_covariance_dict[str(edge)]
+        else:
+            c1 = gtsam.symbol('c', index_list[i])
+            c2 = gtsam.symbol('c', index_list[i + 1])
+            c_n_giving_c_i = get_relative_consecutive_covariance(c1, c2, marginals)
+            relative_covariance_dict[edge] = c_n_giving_c_i
+        if cov is None:
+            cov = c_n_giving_c_i
+        else:
+            cov = cov + c_n_giving_c_i
+    return cov
+    cov = None
+    if len(index_list) == 1:
+        c = gtsam.symbol('c', index_list[0])
+        cov = marginals.marginalCovariance(c)
+        return cov
+    for i in range(len(index_list) - 1):
+        c1 = gtsam.symbol('c', index_list[i])
+        c2 = gtsam.symbol('c', index_list[i + 1])
+        keys = gtsam.KeyVector()
+        keys.append(c1)
+        keys.append(c2)
+        marginal_information = marginals.jointMarginalInformation(keys)
+        inf_c2_giving_c1 = marginal_information.at(c2, c2)
+        cov_c2_giving_c1 = np.linalg.inv(inf_c2_giving_c1)
+        c_n_giving_c_i = cov_c2_giving_c1
+        if cov is None:
+            cov = c_n_giving_c_i
+        else:
+            cov = cov + c_n_giving_c_i
+    return cov
+
+
     cov_sum = None
     if len(index_list) == 1:
         # Single camera frame: return its marginal covariance
@@ -170,14 +234,6 @@ def get_relative_covariance(index_list, marginals):
             cov_sum = cov_sum + c_n_giving_c_i
     return cov_sum
 
-
-def get_relative_pose(pose):
-    """
-    Placeholder function to compute relative pose. (Function not implemented)
-
-    :param pose: Pose object.
-    """
-    pass
 
 
 def calculate_mahalanobis_distance(c_n, c_i, result, relative_information):
@@ -233,17 +289,23 @@ def check_candidate(c_n_idx, c_i_idx, marginals, result, index_list):
     # Compute the cumulative relative covariance along the path
     c_n_giving_c_i = get_relative_covariance(cur_index_list, marginals)
 
+
     # Compute the relative information matrix
-    relative_information = np.linalg.inv(c_n_giving_c_i)
+    # relative_information = np.linalg.inv(c_n_giving_c_i)
 
     # Generate symbols for the camera frames
     symbol_cn = get_symbol(index_list[c_n_idx])
     symbol_ci = get_symbol(index_list[c_i_idx])
 
     # Calculate the Mahalanobis distance between the two camera poses
-    mahalanobis_distance = calculate_mahalanobis_distance(symbol_cn, symbol_ci, result, relative_information)
+    # mahalanobis_distance = calculate_mahalanobis_distance(symbol_cn, symbol_ci, result, relative_information)
+    # return mahalanobis_distance
 
+    gtsam_cov = gtsam.noiseModel.Gaussian.Covariance(c_n_giving_c_i)
+    mahalanobis_distance =  np.sqrt(2*gtsam.BetweenFactorPose3(symbol_cn, symbol_ci, gtsam.Pose3(), gtsam_cov).error(result))
+    # print(mahalanobis_distance)
     return mahalanobis_distance
+
 
 
 KEY_FRAME_GAP = 10  # Minimum gap between key frames to consider for loop closure
@@ -260,6 +322,7 @@ def get_good_candidates(c_n_index, marginals, result, index_list):
     :return: List of candidate camera frame indices that are good loop closures.
     """
     candidates = []
+
     last_index_to_check = c_n_index - KEY_FRAME_GAP
 
     # Iterate through potential candidates ensuring a minimum frame gap
@@ -267,14 +330,17 @@ def get_good_candidates(c_n_index, marginals, result, index_list):
         mahalanobis_distance = check_candidate(c_n_index, c_i_index, marginals, result, index_list)
         # print(f'Mahalanobis distance between {c_n_index} and {c_i_index}: {mahalanobis_distance}')
         if mahalanobis_distance < MAHALANOBIS_THRESHOLD:
-            candidates.append(index_list[c_i_index])
+            candidates.append((index_list[c_i_index], mahalanobis_distance))
             print(
                 f'added candidate {index_list[c_i_index]} with distance {mahalanobis_distance} to {index_list[c_n_index]}')
         elif mahalanobis_distance > FAR_MAHALANOBIS_THRESHOLD:
             # Skip further candidates if distance is too large
             c_i_index += 2
 
-    return candidates
+    candidates.sort(key=lambda x: x[1])
+    candidates = candidates[:MAX_CANDIDATES]
+    candidate_index = [c[0] for c in candidates]
+    return candidate_index
 
 
 def get_path(c_n, c_i, result):
@@ -289,18 +355,7 @@ def get_path(c_n, c_i, result):
     return [index for index in range(c_i, c_n + 1)]
 
 
-def load(base_filename):
-    """
-    Load serialized data from a pickle file.
 
-    :param base_filename: Base filename without extension.
-    :return: Loaded data object.
-    """
-    filename = base_filename + '.pkl'
-    with open(filename, 'rb') as file:
-        data = pickle.load(file)
-    print('Bundles loaded from', filename)
-    return data
 
 
 def get_index_list(result):
@@ -317,6 +372,34 @@ def get_index_list(result):
     index_list.sort()
     return index_list
 
+
+# def init_dijksra_graph_relative_covariance_dict(result_without_closure, pose_graph_without_closure,
+#                                                 cov_dict, dijkstra_graph):
+#     """
+#     Initialize the Dijkstra graph and relative covariance dictionary based on the pose graph without loop closures.
+#
+#     :param result_without_closure: Pose estimates without loop closures.
+#     :param pose_graph_without_closure: Pose graph without loop closures.
+#     :param cov_dict: Dictionary to store relative covariances.
+#     :param dijkstra_graph: Dijkstra graph to store covariance paths.
+#     :return: Updated covariance dictionary and Dijkstra graph.
+#     """
+#     # Compute marginals for the current pose graph
+#     marginals = gtsam.Marginals(pose_graph_without_closure, result_without_closure)
+#     index_list = get_index_list(result_without_closure)
+#
+#     # Iterate through consecutive camera frames to populate covariance dictionary and graph
+#     for i in range(len(index_list) - 1):
+#         c1 = gtsam.symbol('c', index_list[i])
+#         c2 = gtsam.symbol('c', index_list[i + 1])
+#         c_n_giving_c_i = get_relative_consecutive_covariance(c1, c2, marginals)
+#
+#         cov_dict[index_list[i + 1]] = c_n_giving_c_i
+#         dijkstra_graph.add_edge(index_list[i], index_list[i + 1], c_n_giving_c_i)
+#
+#     # Add the marginal covariance for the first camera frame
+#     cov_dict[index_list[0]] = marginals.marginalCovariance(gtsam.symbol('c', index_list[0]))
+#     return cov_dict, dijkstra_graph
 
 def init_dijksra_graph_relative_covariance_dict(result_without_closure, pose_graph_without_closure,
                                                 cov_dict, dijkstra_graph):
@@ -337,7 +420,27 @@ def init_dijksra_graph_relative_covariance_dict(result_without_closure, pose_gra
     for i in range(len(index_list) - 1):
         c1 = gtsam.symbol('c', index_list[i])
         c2 = gtsam.symbol('c', index_list[i + 1])
-        c_n_giving_c_i = get_relative_consecutive_covariance(c1, c2, marginals)
+
+        keys = gtsam.KeyVector()
+        keys.append(c1)
+        keys.append(c2)
+        marginal_information = marginals.jointMarginalInformation(keys)
+        inf_c2_giving_c1 = marginal_information.at(c2, c2)
+        cov_c2_giving_c1 = np.linalg.inv(inf_c2_giving_c1)
+        c_n_giving_c_i = cov_c2_giving_c1
+
+        cov_dict[str((index_list[i], index_list[i + 1]))] = c_n_giving_c_i
+
+        keys = gtsam.KeyVector()
+        keys.append(c1)
+        keys.append(c2)
+        inf_c1_giving_c2 = marginal_information.at(c1, c1)
+        cov_c1_giving_c2 = np.linalg.inv(inf_c1_giving_c2)
+        c_i_giving_c_n = cov_c1_giving_c2
+
+        cov_dict[str((index_list[i + 1], index_list[i]))] = c_i_giving_c_n
+
+        # c_n_giving_c_i = get_relative_consecutive_covariance(c1, c2, marginals)
         cov_dict[index_list[i + 1]] = c_n_giving_c_i
         dijkstra_graph.add_edge(index_list[i], index_list[i + 1], c_n_giving_c_i)
 
@@ -400,8 +503,9 @@ def find_loops(pose_graph, db):
     :param data: Tuple containing pose graph and result.
     :return: Updated pose graph and result with loop closures.
     """
-    # pg = pose_graph.graph
+    # pg.pkl = pose_graph.graph
     # result = pose_graph.result
+    # loops_frames = [1489,1497,1504,1543,2362,2369,3140,3188,3202]
     pg = pose_graph.graph
     result = pose_graph.result
     if result is None:
@@ -417,6 +521,8 @@ def find_loops(pose_graph, db):
 
     # Iterate through each camera frame to find loop closures
     for c_n_index in tqdm(range(len(index_list))):
+        # if index_list[c_n_index] not in loops_frames:
+        #     continue
         good_candidates = get_good_candidates(c_n_index, marginals, result, index_list)
         if len(good_candidates) > 0:
             camera_number = index_list[c_n_index]
@@ -426,22 +532,22 @@ def find_loops(pose_graph, db):
                 continue
 
             # Find the best candidate with sufficient inliers
-            best_candidate, matches = consensus_matches(camera_number, good_candidates, db)
+            best_candidate, matches, rel_T_to_candidate = consensus_matches(camera_number, good_candidates, db)
             if best_candidate is not None:
                 familiar_path = True
                 # Insert the loop closure into the pose graph
                 pg, result = insert_to_pose_graph(camera_number, best_candidate,
-                                                  matches, pg, result,db)
+                                                  matches, pg, result,db,rel_T_to_candidate)
                 print(f"loop detected between camera {camera_number} and camera {best_candidate}")
         else:
             if len(frames_in_familiar_path) > 0:
                 # Process the accumulated familiar path frames in reverse order
                 for camera_number, candidates in frames_in_familiar_path[::-1]:
-                    best_candidate, matches = consensus_matches(camera_number, candidates, db)
+                    best_candidate, matches, rel_T_to_candidate = consensus_matches(camera_number, candidates, db)
                     if best_candidate is not None:
                         # Insert the loop closure into the pose graph
                         pg, result = insert_to_pose_graph(camera_number, best_candidate,
-                                                          matches, pg, result,db)
+                                                          matches, pg, result,db,rel_T_to_candidate)
                         print(
                             f"end of familiar segment, loop closure between camera {camera_number} "
                             f"and camera {best_candidate}"
@@ -451,7 +557,7 @@ def find_loops(pose_graph, db):
                 frames_in_familiar_path = []
     pose_graph.graph = pg
     pose_graph.result = result
-    return pose_graph
+    return pose_graph, pg, result
 
 
 def plot_graph_along(camera_number, pose_graph, result):
@@ -468,7 +574,7 @@ def plot_graph_along(camera_number, pose_graph, result):
                           f" camera {camera_number}, Q_7_5_4")
 
 
-def insert_to_pose_graph(camera_number, best_candidate, matches, pose_graph, result,db):
+def insert_to_pose_graph(camera_number, best_candidate, matches, pose_graph, result,db,rel_T_to_candidate):
     """
     Insert a loop closure between two camera frames into the pose graph.
 
@@ -482,8 +588,9 @@ def insert_to_pose_graph(camera_number, best_candidate, matches, pose_graph, res
     # Compute relative pose and covariance between the two frames
     # try:
     rel_pose_new, rel_cov_new = get_relative_pose_and_cov(camera_number, best_candidate, pose_graph, result, matches,
-                                                          db)
-
+                                                          db,rel_T_to_candidate)
+    global new_edges
+    new_edges.append((camera_number, best_candidate))
     # index_list = get_index_list(result)
     # old_camera_index = index_list.index(camera_number)
     # camera_before = index_list[old_camera_index - 1]
@@ -495,6 +602,17 @@ def insert_to_pose_graph(camera_number, best_candidate, matches, pose_graph, res
 
     # Add the relative pose to the pose graph and optimize
     pose_graph, result = update_pose_graph(pose_graph, result, rel_pose_new, rel_cov_new, camera_number, best_candidate)
+    #update the dictionary of relative cov between the two frames
+    global relative_covariance_dict
+    init_dijksra_graph_relative_covariance_dict(result, pose_graph, relative_covariance_dict, cov_dijkstra_graph)
+    marginals = gtsam.Marginals(pose_graph, result)
+    for edge in new_edges:
+        c1_symbol = gtsam.symbol('c', edge[0])
+        c2_symbol = gtsam.symbol('c', edge[1])
+        rel_cov = get_relative_consecutive_covariance(c1_symbol,c2_symbol,marginals)
+        relative_covariance_dict[(edge[0], edge[1])] = rel_cov
+        relative_covariance_dict[(edge[1], edge[0])] = rel_cov
+        cov_dijkstra_graph.add_edge(camera_number, best_candidate, rel_cov)
 
     # Plot the updated graph
 
@@ -594,9 +712,11 @@ def ransac_pnp(matches_l_l, prev_links, cur_links):
     if success:
         # Convert to transformation matrix and compute relative pose
         T = rodriguez_to_mat(rotation_vector, translation_vector)
-        inv_t = get_inverse(T)
-        relative_pose = gtsam.Pose3(gtsam.Rot3(inv_t[:3, :3]), gtsam.Point3(inv_t[:3, 3]))
-        return relative_pose, best_matches_idx, best_inliers
+        # inv_t = get_inverse(T)
+        world_to_camera = gtsam.Pose3(gtsam.Rot3(T[:3, :3]), gtsam.Point3(T[:3, 3]))
+        camera_to_world = world_to_camera.inverse()
+        # relative_pose = gtsam.Pose3(gtsam.Rot3(inv_t[:3, :3]), gtsam.Point3(inv_t[:3, 3]))
+        return camera_to_world, best_matches_idx, best_inliers
     else:
         return None, None, None
 
@@ -632,10 +752,10 @@ def check_candidate_match(reference_key_frame, candiate_keyframe, db: TrackingDB
         percentage_inliers = 0
 
     # print(f"Percentage of inliers: {percentage_inliers}")
-    return [matches_l_l[i] for i in best_matches_idx], percentage_inliers
+    return [matches_l_l[i] for i in best_matches_idx], percentage_inliers,T
 
 
-def create_bundle(first_frame_idx, second_frame_idx, bundle_graph, result, inliers, db: TrackingDB):
+def create_bundle(first_frame_idx, second_frame_idx, bundle_graph, result, inliers, db: TrackingDB,rel_T):
     """
     Create a factor graph (bundle) for two camera frames with inlier matches.
 
@@ -657,7 +777,7 @@ def create_bundle(first_frame_idx, second_frame_idx, bundle_graph, result, inlie
 
     # Define a prior for the first camera frame (identity pose)
     first_pose = gtsam.Pose3()
-    first_pose_sigma = gtsam.noiseModel.Diagonal.Sigmas(np.array([0.01, 0.01, 0.01, 0.01, 0.01, 0.01]))
+    first_pose_sigma = gtsam.noiseModel.Diagonal.Sigmas(np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0]))
     graph.add(gtsam.PriorFactorPose3(first_frame_symbol, first_pose, first_pose_sigma))
     initial_estimate.insert(first_frame_symbol, gtsam.Pose3())
 
@@ -666,12 +786,21 @@ def create_bundle(first_frame_idx, second_frame_idx, bundle_graph, result, inlie
         calculate_relative_pose_cov(first_frame_symbol, second_frame_symbol, bundle_graph, result)
     )
 
+
     # Insert the relative pose into the initial estimates
-    initial_estimate.insert(second_frame_symbol, relative_pose_second)
+    initial_estimate.insert(second_frame_symbol, rel_T)
+
+    # initial_estimate.insert(second_frame_symbol, relative_pose_second)
+    # rel_in_gtsam = gtsam.Pose3(gtsam.Rot3(T[:3, :3]), gtsam.Point3(T[:3, 3]))
+    # rel_in_gtsam = rel_in_gtsam.inverse()
 
     # Add the relative pose factor to the graph
     noise_model = gtsam.noiseModel.Gaussian.Covariance(relative_cov_second)
-    factor = gtsam.BetweenFactorPose3(first_frame_symbol, second_frame_symbol, relative_pose_second, noise_model)
+    # noise_model = gtsam.noiseModel.Gaussian.Covariance(first_pose_sigma)
+    # noise_model = first_pose_sigma
+    # factor = gtsam.BetweenFactorPose3(first_frame_symbol, second_frame_symbol, relative_pose_second, noise_model)
+
+    factor = gtsam.BetweenFactorPose3(first_frame_symbol, second_frame_symbol, rel_T, noise_model)
     graph.add(factor)
 
     # Create a stereo camera model for the first frame
@@ -691,10 +820,13 @@ def create_bundle(first_frame_idx, second_frame_idx, bundle_graph, result, inlie
         sigma = gtsam.noiseModel.Isotropic.Sigma(3, 1.0)
 
         # Add a stereo factor for the first frame
-        graph.add(gtsam.GenericStereoFactor3D(
+        factor = gtsam.GenericStereoFactor3D(
             gtsam.StereoPoint2(first_link.x_left, first_link.x_right, first_link.y),
             sigma, first_frame_symbol, location_symbol, K_OBJECT
-        ))
+        )
+
+        graph.add(factor)
+
 
         # Triangulate the 3D point from the first frame's stereo measurements
         reference_triangulated_point = gtsam_frame_1.backproject(
@@ -704,18 +836,20 @@ def create_bundle(first_frame_idx, second_frame_idx, bundle_graph, result, inlie
 
         # Insert the triangulated 3D point into the initial estimates
         initial_estimate.insert(location_symbol, reference_triangulated_point)
-
+        x = factor.error(initial_estimate)
         # Add a stereo factor for the second frame
         second_link = second_frame_links[match.trainIdx]
-        graph.add(gtsam.GenericStereoFactor3D(
+        factor = gtsam.GenericStereoFactor3D(
             gtsam.StereoPoint2(second_link.x_left, second_link.x_right, second_link.y),
             sigma, second_frame_symbol, location_symbol, K_OBJECT
-        ))
+        )
+        graph.add(factor)
+        x = factor.error(initial_estimate)
 
     return graph, initial_estimate
 
 
-def get_relative_pose_and_cov(first_frame_idx, second_frame_idx, bundle_graph, result, inliers, db: TrackingDB):
+def get_relative_pose_and_cov(first_frame_idx, second_frame_idx, bundle_graph, result, inliers, db: TrackingDB,rel_T):
     """
     Optimize the pose graph by adding a new factor between two frames.
 
@@ -728,7 +862,7 @@ def get_relative_pose_and_cov(first_frame_idx, second_frame_idx, bundle_graph, r
     :return: Relative pose and covariance between the two frames.
     """
     # Create a new bundle graph and initial estimates for the two frames
-    graph, initial_estimate = create_bundle(first_frame_idx, second_frame_idx, bundle_graph, result, inliers, db)
+    graph, initial_estimate = create_bundle(first_frame_idx, second_frame_idx, bundle_graph, result, inliers, db,rel_T)
 
     graph, new_res = optimize_graph(graph, initial_estimate)
 
@@ -776,19 +910,19 @@ def consensus_matches(reference_key_frame, candidates_index_lst, data_base: Trac
 
     # Iterate through candidates to find one with sufficient inliers
     for candidate in candidates_index_lst:
-        matches, percentage = check_candidate_match(reference_key_frame, candidate, data_base)
+        matches, percentage, rel_T_to_candidate = check_candidate_match(reference_key_frame, candidate, data_base)
         if len(matches) > INLIERS_THRESHOLD:
             print(f"cand: {candidate}, matches: {len(matches)} inliers percentage: {percentage}")
             best_candidate = candidate
             best_matches = matches
-            return best_candidate, best_matches
+            return best_candidate, best_matches, rel_T_to_candidate
 
     # If no candidate meets the inliers threshold, reset best_candidate
     if len(best_matches) > 0:
         if len(best_matches) < INLIERS_THRESHOLD:
             best_candidate = None
             best_matches = []
-    return best_candidate, best_matches
+    return best_candidate, best_matches,rel_T_to_candidate
 
 
 def get_camera_location_from_gtsam(pose: gtsam.Pose3):
@@ -809,7 +943,7 @@ def plot_matches(first_frame, second_frame,db):
     :param second_frame: Index of the second camera frame.
     """
     # Retrieve inlier matches
-    inliers, _ = check_candidate_match(first_frame, second_frame, db)
+    inliers, _,__ = check_candidate_match(first_frame, second_frame, db)
     query_idx_list = [match.queryIdx for match in inliers]
 
     # Retrieve all matches and identify outliers
@@ -1130,49 +1264,49 @@ def q_7_5(pose_graph, result, data):
 
 # init_dijksra_graph_relative_covariance_dict(data_list[1], data_list[0], relative_covariance_dict,
 #                                             cov_dijkstra_graph)
-if __name__ == '__main__':
-
-    # Load the initial pose graph and result from a serialized file
-
-    # db = get_tracking_database("/Users/mac/67604-SLAM-video-navigation/final_project/AKAZE_DB")
-
-    db = TrackingDB()
-    db.load("/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/AKAZE")
-    key_frames = bundle.get_keyframes(db)
-    pose_graph = PoseGraph()
-    pose_graph_no_lc = PoseGraph()
-    all_bundles = []
-    for key_frame in key_frames:
-        first_frame = key_frame[0]
-        last_frame = key_frame[1]
-        graph, initial, cameras_dict, frames_dict = bundle.create_single_bundle(key_frame[0], key_frame[1], db)
-        graph, result = bundle.optimize_graph(graph, initial)
-        # print(f"bad point {result.atPoint3(bad_symbol)}")
-
-        bundle_dict = {'graph': graph, 'initial': initial, 'cameras_dict': cameras_dict, 'frames_dict': frames_dict,
-                       'result': result, 'keyframes': key_frame}
-        all_bundles.append(bundle_dict)
-        pose_graph.add_bundle(bundle_dict)
-        pose_graph_no_lc.add_bundle(bundle_dict)
-        print(f"Bundle {key_frame} added to the pose graph")
-    # save(all_bundles, "/Users/mac/67604-SLAM-video-navigation/final_project/AKAZE_BUNDLE_NEW")
-    # pose_graph.save("/Users/mac/67604-SLAM-video-navigation/final_project/AKAZE_POSE_GRAPH_NEW")
-    pose_graph.optimize()
-    pose_graph_no_lc.optimize()
-    find_loops(pose_graph, db)
-    # pose_graph.save("/Users/mac/67604-SLAM-video-navigation/final_project/AKAZE_POSE_GRAPH_LC_NEW")
-    # pose_graph_no_lc = PoseGraph.load("/Users/mac/67604-SLAM-video-navigation/final_project/AKAZE_POSE_GRAPH_NEW")
-    # pose_graph_no_lc.optimize()
-    marginals = gtsam.Marginals(pose_graph.graph, pose_graph.result)
-    q_7_5_6(marginals, pose_graph_no_lc.result, pose_graph_no_lc.graph)
-
-    pose_graph_lc = PoseGraph.load("/Users/mac/67604-SLAM-video-navigation/final_project/AKAZE_POSE_GRAPH_LC_NEW")
-
-
-    # pose_graph_no_lc = PoseGraph.load("/Users/mac/67604-SLAM-video-navigation/final_project/AKAZE_POSE_GRAPH_NEW")
-    # pose_graph_no_lc.optimize()
-    plot_pose_graphs_XZ_ground_truth(pose_graph_lc.result, pose_graph_no_lc.result, pose_graph_lc.graph, pose_graph_no_lc.graph)
-    plt.show()
+# if __name__ == '__main__':
+#
+#     # Load the initial pose graph and result from a serialized file
+#
+#     # db = get_tracking_database("/Users/mac/67604-SLAM-video-navigation/final_project/AKAZE_DB")
+#
+#     db = TrackingDB()
+#     db.load("/Users/mac/67604-SLAM-video-navigation/VAN_ex/docs/AKAZE")
+#     key_frames = bundle.get_keyframes(db)
+#     pose_graph = PoseGraph()
+#     pose_graph_no_lc = PoseGraph()
+#     all_bundles = []
+#     for key_frame in key_frames:
+#         first_frame = key_frame[0]
+#         last_frame = key_frame[1]
+#         graph, initial, cameras_dict, frames_dict = bundle.create_single_bundle(key_frame[0], key_frame[1], db)
+#         graph, result = bundle.optimize_graph(graph, initial)
+#         # print(f"bad point {result.atPoint3(bad_symbol)}")
+#
+#         bundle_dict = {'graph': graph, 'initial': initial, 'cameras_dict': cameras_dict, 'frames_dict': frames_dict,
+#                        'result': result, 'keyframes': key_frame}
+#         all_bundles.append(bundle_dict)
+#         pose_graph.add_bundle(bundle_dict)
+#         pose_graph_no_lc.add_bundle(bundle_dict)
+#         print(f"Bundle {key_frame} added to the pose graph")
+#     # save(all_bundles, "/Users/mac/67604-SLAM-video-navigation/final_project/AKAZE_BUNDLE_NEW")
+#     # pose_graph.save("/Users/mac/67604-SLAM-video-navigation/final_project/AKAZE_POSE_GRAPH_NEW")
+#     pose_graph.optimize()
+#     pose_graph_no_lc.optimize()
+#     find_loops(pose_graph, db)
+#     # pose_graph.save("/Users/mac/67604-SLAM-video-navigation/final_project/AKAZE_POSE_GRAPH_LC_NEW")
+#     # pose_graph_no_lc = PoseGraph.load("/Users/mac/67604-SLAM-video-navigation/final_project/AKAZE_POSE_GRAPH_NEW")
+#     # pose_graph_no_lc.optimize()
+#     marginals = gtsam.Marginals(pose_graph.graph, pose_graph.result)
+#     q_7_5_6(marginals, pose_graph_no_lc.result, pose_graph_no_lc.graph)
+#
+#     pose_graph_lc = PoseGraph.load("/Users/mac/67604-SLAM-video-navigation/final_project/AKAZE_POSE_GRAPH_LC_NEW")
+#
+#
+#     # pose_graph_no_lc = PoseGraph.load("/Users/mac/67604-SLAM-video-navigation/final_project/AKAZE_POSE_GRAPH_NEW")
+#     # pose_graph_no_lc.optimize()
+#     plot_pose_graphs_XZ_ground_truth(pose_graph_lc.result, pose_graph_no_lc.result, pose_graph_lc.graph, pose_graph_no_lc.graph)
+#     plt.show()
 
 
     # pose_graph.save("/Users/mac/67604-SLAM-video-navigation/final_project/sift_p_graph_no_lc")
@@ -1184,18 +1318,18 @@ if __name__ == '__main__':
 #     init_dijksra_graph_relative_covariance_dict(data_list[1], data_list[0], relative_covariance_dict,
 #                                                 cov_dijkstra_graph)
 #
-#     pg, res = find_loops(data_list,db)
-#     pose_graph.graph = pg
+#     pg.pkl, res = find_loops(data_list,db)
+#     pose_graph.graph = pg.pkl
 #     pose_graph.result = res
 #     pose_graph.save("/Users/mac/67604-SLAM-video-navigation/final_project/sift_p_graph_with_LC")
-#     # save((pg, res, relative_covariance_dict, cov_dijkstra_graph), "updated_pose_graph_results")
+#     # save((pg.pkl, res, relative_covariance_dict, cov_dijkstra_graph), "updated_pose_graph_results")
 #
 #     # Load the updated pose graph results with loop closures
-#     # pg, res, relative_covariance_dict, cov_dijkstra_graph = load("updated_pose_graph_results")
+#     # pg.pkl, res, relative_covariance_dict, cov_dijkstra_graph = load("updated_pose_graph_results")
 #
 #     # Perform analysis and plotting on the pose graph
 #     # data_list = load(path)
-#     # q_7_5(pg, res, data_list)
+#     # q_7_5(pg.pkl, res, data_list)
 #     #
 #     # # Plot the final updated pose graph trajectory
 #     # plot_trajectory(0, res, title="updated pose graph", scale=1)

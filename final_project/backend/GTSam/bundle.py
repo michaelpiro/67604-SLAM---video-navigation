@@ -6,8 +6,9 @@ import cv2
 import final_project.arguments as arguments
 
 from final_project.backend.database.tracking_database import TrackingDB
-from final_project.utils import K, M2, M1, P, Q, rodriguez_to_mat, read_extrinsic_matrices
-from final_project.algorithms.triangulation import triangulate_last_frame
+from final_project.utils import K, M2, M1, P, Q, rodriguez_to_mat, read_extrinsic_matrices, visualize_track
+from final_project.algorithms.triangulation import triangulate_last_frame, triangulate_links, \
+    linear_least_squares_triangulation
 from final_project.backend.GTSam.gtsam_utils import get_inverse, get_factor_point, get_factor_symbols
 from final_project.arguments import *
 
@@ -60,12 +61,13 @@ def get_bundles_rel_Ts(db: TrackingDB, first_frame_idx, last_frame_idx):
         success, rotation_vector, translation_vector = cv2.solvePnP(triangulated_links, img_points, K,
                                                                     distCoeffs=diff_coeff, flags=cv2.SOLVEPNP_EPNP)
 
-        inv_t = rodriguez_to_mat(rotation_vector, translation_vector) if success else None
-        if inv_t is None:
+        T = rodriguez_to_mat(rotation_vector, translation_vector) if success else None
+        if T is None:
             raise Exception("PnP failed")
-        new_trans = get_inverse(inv_t)
-        transformations[current_frame_id] = get_inverse(new_trans @ last_frame_transform)
-
+        # new_trans = get_inverse(inv_t)
+        transformations[current_frame_id] = T @ np.vstack((last_frame_transform[:3, :], np.array([0, 0, 0, 1])))
+    for camera_id in transformations.keys():
+        transformations[camera_id] = transformations[camera_id][0:3, :]
     return transformations
 
 
@@ -103,11 +105,13 @@ def create_single_bundle(first_frame_idx, last_frame_idx, db):
             relevant_tracks.update(intersection)
             rotation = camera_pose[:3, :3]
             translation = camera_pose[:3, 3]
-            pose = gtsam.Pose3(gtsam.Rot3(rotation), gtsam.Point3(translation))
-            initial_estimate.insert(pose_symbol, pose)
+            word_to_cam_pose = gtsam.Pose3(gtsam.Rot3(rotation), gtsam.Point3(translation))
+            cam_to_word_pose = word_to_cam_pose.inverse()
+
+            initial_estimate.insert(pose_symbol, cam_to_word_pose)
 
         # Create the stereo camera
-        gtsam_frame = gtsam.StereoCamera(pose, K_OBJECT)
+        gtsam_frame = gtsam.StereoCamera(cam_to_word_pose, K_OBJECT)
         gtsam_frames[frame_id] = gtsam_frame
         camera_symbols[frame_id] = pose_symbol
 
@@ -118,6 +122,7 @@ def create_single_bundle(first_frame_idx, last_frame_idx, db):
         tracks_frames = sorted(db.frames(track_id), reverse=True)
         track_last_frame = min(db.last_frame_of_track(track_id), last_frame_idx)
         location_symbol = gtsam.symbol('l', track_id)
+        triangulated_frame_id = None
         for frame_id in tracks_frames:
             if frame_id > last_frame_idx or frame_id < first_frame_idx:
                 continue
@@ -133,18 +138,30 @@ def create_single_bundle(first_frame_idx, last_frame_idx, db):
                     gtsam_frame = gtsam_frames[frame_id]
                     reference_triangulated_point = gtsam_frame.backproject(
                         gtsam.StereoPoint2(stereo_point2d[0], stereo_point2d[1], stereo_point2d[2]))
-
+                    # triangulated_point = triangulate_links([link],P,Q)[0]
+                    # gtsam_frame.project(gtsam.Point3(triangulated_point[0]))
+                    triangulated_frame_id = frame_id
                     assert reference_triangulated_point[2] > 0
 
                     initial_estimate.insert(location_symbol, reference_triangulated_point)
 
                 # Create the factor
-                sigma = gtsam.noiseModel.Isotropic.Sigma(3, 0.1)
-                graph.add(
-                    gtsam.GenericStereoFactor3D(gtsam.StereoPoint2(link.x_left, link.x_right, link.y), sigma,
-                                                pose_symbol,
-                                                location_symbol,
-                                                K_OBJECT))
+                noise = np.array([1, 1, 1]) + 1.5 * (abs(frame_id-triangulated_frame_id))
+                sigma = gtsam.noiseModel.Diagonal.Sigmas(noise)
+                # sigma = gtsam.noiseModel.Isotropic.Sigma(3, 1.0)
+
+                factor = gtsam.GenericStereoFactor3D(gtsam.StereoPoint2(link.x_left, link.x_right, link.y), sigma,
+                                                     pose_symbol,
+                                                     location_symbol,
+                                                     K_OBJECT)
+
+
+                # print(f"track id: {track_id}, camera: {frame_id} factor error: {factor.error(initial_estimate)}")
+                # error = factor.error(initial_estimate)
+                graph.add(factor)
+                # if error > 20000:
+                    # initial_estimate.
+                    # visualize_track(db, track_id)
 
     return graph, initial_estimate, camera_symbols, gtsam_frames
 
@@ -159,7 +176,7 @@ def get_negative_z_points(result, graph):
         factor = graph.at(i)
         if isinstance(factor, gtsam.GenericStereoFactor3D):
             point = get_factor_point(factor, result)
-            if point[2] < 0 or point[2] > 2000:
+            if point[2] < 0 or point[2] > 1000:
                 camera_symbol, track_symbol = get_factor_symbols(factor)
                 values_to_remove.append(track_symbol)
                 factors_to_remove.append(i)
@@ -167,6 +184,7 @@ def get_negative_z_points(result, graph):
                 new_graph.add(factor)
         else:
             new_graph.add(factor)
+            # print(f"factor error {factor.error(result)}")
 
     values_to_remove = list(set(values_to_remove))
     for value_to_remove in values_to_remove:
@@ -296,4 +314,3 @@ def get_all_bundles(db):
         cameras_locations.append(-rot.T @ t)
 
     return bundles
-

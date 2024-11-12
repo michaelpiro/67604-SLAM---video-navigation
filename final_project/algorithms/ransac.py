@@ -36,6 +36,9 @@ def transformation_agreement(T, traingulated_pts,
     l1_4d_projected = ((K @ T @ np.vstack((M1, np.array([0, 0, 0, 1])))) @ points_4d)[:3, :].T
     r1_4d_projected = ((K @ T @ np.vstack((M2, np.array([0, 0, 0, 1])))) @ points_4d)[:3, :].T
 
+    # l1_4d_projected = (T @ np.vstack((P, np.array([0,0,0,1]))) @ points_4d)[:3, :].T
+    # r1_4d_projected = (T @ np.vstack((Q, np.array([0,0,0,1]))) @ points_4d)[:3, :].T
+
     transformed_to_l1_points = l1_4d_projected / l1_4d_projected[:, 2][:, np.newaxis]
     real_y = ordered_cur_left_pix_values[:, 1]
     agree_l1 = np.abs(transformed_to_l1_points[:, 1] - real_y) < 2

@@ -73,10 +73,20 @@ class PoseGraph:
         noise_model = gtsam.noiseModel.Gaussian.Covariance(relative_cov)
 
         if self.last_pose is None:
-            factor = gtsam.PriorFactorPose3(start_frame_symbol, first_frame_pose, self.first_frame_cov)
+            # zero_pose = gtsam.Pose3()
+            # # rel_pose_zero = zero_pose.between(first_frame_pose)
+            # factor = gtsam.PriorFactorPose3(start_frame_symbol, zero_pose, self.first_frame_cov)
+            # self.graph.add(factor)
+            # self.initial_estimate.insert(start_frame_symbol, first_frame_pose)
+            # self.last_pose = first_frame_pose
+
+
+            zero_pose = gtsam.Pose3()
+            # rel_pose_zero = zero_pose.between(first_frame_pose)
+            factor = gtsam.PriorFactorPose3(start_frame_symbol, zero_pose, self.first_frame_cov)
             self.graph.add(factor)
-            self.initial_estimate.insert(start_frame_symbol, first_frame_pose)
-            self.last_pose = first_frame_pose
+            self.initial_estimate.insert(start_frame_symbol, zero_pose)
+            self.last_pose = zero_pose
 
         factor = gtsam.BetweenFactorPose3(start_frame_symbol, end_frame_symbol, relative_pose, noise_model)
         self.graph.add(factor)
@@ -98,7 +108,7 @@ class PoseGraph:
 
     def save(self, filename):
         """Save the pose graph to a file."""
-        with open(filename, 'wb') as file:
+        with open(filename + '.pkl', 'wb') as file:
             pickle.dump(self, file)
         print('PoseGraph saved to', filename)
 

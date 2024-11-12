@@ -1,8 +1,14 @@
 import os
+from typing import Tuple
+
 import cv2
 import numpy as np
+from matplotlib import pyplot as plt
+
 from final_project.arguments import *
 from final_project.arguments import DATA_PATH, LEN_DATA_SET
+from final_project.backend.database.tracking_database import TrackingDB
+
 MAC = True
 GROUND_TRUTH_PATH = "/Users/mac/67604-SLAM-video-navigation/VAN_ex/dataset/poses/00.txt"
 
@@ -87,6 +93,42 @@ def get_ground_truth_locations():
         t = cam[:3, 3]
         cameras_locations2.append(-rot.T @ t)
     return cameras_locations2
+
+
+
+
+
+def visualize_track(tracking_db: TrackingDB, trackId: int):
+
+    def get_feature_location(tracking_db: TrackingDB, frameId: int, trackId: int) -> Tuple[float, float]:
+        link = tracking_db.linkId_to_link[(frameId, trackId)]
+        return link.x_left, link.y
+    frames = tracking_db.frames(trackId)
+    print(f"Track {trackId} has {len(frames)} frames")
+    plt.figure()
+    num_frames = min(len(frames),8)
+    for i in range(0, num_frames, 1):
+        # print(f"Frame {frames[i]}")
+        frameId = frames[i]
+        img, _ = read_images(frameId)
+        x_left, y = get_feature_location(tracking_db, frameId, trackId)
+        x_min = int(max(x_left - 10, 0))
+        x_max = int(min(x_left + 10, img.shape[1]))
+        y_min = int(max(y - 10, 0))
+        y_max = int(min(y + 10, img.shape[0]))
+        cutout = img[y_min:y_max, x_min:x_max]
+
+        plt.subplot(num_frames, 2, 2 * i + 1)
+        plt.imshow(img, cmap='gray')
+        plt.scatter(x_left, y, color='red')  # Center of the cutout
+
+        plt.subplot(num_frames, 2, 2 * i + 2)
+        plt.imshow(cutout, cmap='gray')
+        plt.scatter([10], [10], color='red', marker='x', linewidths=1)  # Center of the cutout
+        if i == 0:
+            plt.title(f"Frame {frameId}, Track {trackId}")
+    plt.show()
+
 
 
 K, M1, M2 = read_cameras()

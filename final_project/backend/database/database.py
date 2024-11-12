@@ -98,7 +98,7 @@ def run(serialized_path):
     return db
 
 
-# run("/Users/mac/67604-SLAM-video-navigation/final_project/AKAZE_DB")
+# run("/Users/mac/67604-SLAM-video-navigation/final_project/sift_db_after_change2")
 
 # create_db(
 #     num_frames=LEN_DATA_SET,

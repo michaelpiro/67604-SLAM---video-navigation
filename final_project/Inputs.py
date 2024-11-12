@@ -20,6 +20,9 @@ def read_images(idx):
 
 
 def read_cameras():
+    """
+    read cameras from the dataset
+    """
     data_path = DATA_PATH
     with open(data_path + 'calib.txt') as f:
         l1 = f.readline().split()[1:]  # skip first token
@@ -60,7 +63,10 @@ def read_extrinsic_matrices(file_path=GROUND_TRUTH_PATH, n=LEN_DATA_SET):
     return extrinsic_matrices
 
 def read_kth_camera(k):
-    filename = '/Users/mac/67604-SLAM-video-navigation/VAN_ex/dataset/poses/00.txt'
+    """
+    read the kth camera from the dataset
+    """
+    filename = GROUND_TRUTH_PATH
     with open(filename, 'r') as file:
         for current_line_number, line in enumerate(file, start=1):
             if current_line_number == k:

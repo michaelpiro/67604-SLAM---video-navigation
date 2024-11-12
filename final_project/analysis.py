@@ -12,6 +12,7 @@ from final_project.backend.database.tracking_database import TrackingDB
 from final_project.backend.GTSam.gtsam_utils import get_factor_symbols, calculate_global_transformation, save, \
     get_poses_from_gtsam, get_index_list, T_B_from_T_A, gtsam_pose_to_T, calculate_dist_traveled
 from final_project.backend.GTSam.bundle import K_OBJECT, get_keyframes, create_single_bundle, optimize_graph
+from final_project.backend.loop.loop_closure import cov_dijkstra_graph, relative_covariance_dict
 from final_project.backend.GTSam.gtsam_utils import load
 
 import numpy as np
@@ -21,7 +22,7 @@ from final_project.backend.loop.loop_closure import find_loops, get_locations_gr
     plot_trajectory2D_ground_truth, init_dijksra_graph_relative_covariance_dict, get_relative_covariance, \
     cov_dijkstra_graph
 
-SUBSET_FACTOR = 0.05
+SUBSET_FACTOR = 0.5
 
 ####################################################################################################
 # TRACKING ANALYSIS
@@ -85,7 +86,7 @@ def plot_connectivity_graph(outgoing_tracks: Dict[int, int]):
     frames = sorted(outgoing_tracks.keys())
     counts = [outgoing_tracks[frame] for frame in frames]
 
-    plt.figure(figsize=(10, 6))
+    plt.figure()
     plt.plot(frames, counts)
     plt.xlabel('Frame ID')
     plt.ylabel('Number of Outgoing Tracks')
@@ -104,7 +105,7 @@ def plot_matches_count_graph(matches_count: Dict[int, int]):
     frames = sorted(matches_count.keys())
     counts = [matches_count[frame] for frame in frames]
 
-    plt.figure(figsize=(10, 6))
+    plt.figure()
     plt.plot(frames, counts)
     plt.xlabel('Frame ID')
     plt.ylabel('Number of Matches')
@@ -116,7 +117,7 @@ def plot_inliers_percentage_graph(inliers_percentage_dict: Dict[int, float]):
     frames = sorted(inliers_percentage_dict.keys())
     percentages = [inliers_percentage_dict[frame] for frame in frames]
 
-    plt.figure(figsize=(20, 10))
+    plt.figure()
     plt.plot(frames, percentages)
     plt.xlabel('Frame ID')
     plt.ylabel('Percentage of Inliers')
@@ -130,7 +131,7 @@ def calculate_track_lengths(tracking_db: TrackingDB) -> List[int]:
 
 
 def plot_track_length_histogram(track_lengths: List[int]):
-    plt.figure(figsize=(10, 6))
+    plt.figure()
     plt.hist(track_lengths, bins=range(1, max(track_lengths) + 2), edgecolor='black')
     plt.xlabel('Track Length')
     plt.ylabel('Frequency')
@@ -158,12 +159,12 @@ def plot_mean_factor_error(all_bundles):
         final_errors.append(graph.error(result) / num_factors)
         first_keyframes.append(first_keyframe)
 
-    plt.figure(figsize=(10, 6))
-    plt.plot(first_keyframes, np.log(np.array(init_errors)), label='Initial Error')
-    plt.plot(first_keyframes, np.log(np.array(final_errors)), label='Final Error')
+    plt.figure()
+    plt.plot(first_keyframes, np.array(init_errors), label='Initial Error')
+    plt.plot(first_keyframes, np.array(final_errors), label='Final Error')
     plt.xlabel('First Keyframe ID')
-    plt.ylabel('Log mean Factor Error')
-    plt.title('Mean Factor Error vs. First Keyframe ID (Log Scale)')
+    plt.ylabel('mean Factor Error')
+    plt.title('Mean Factor Error vs. First Keyframe ID')
     plt.legend()
     plt.grid(True)
 
@@ -229,12 +230,12 @@ def plot_median_projection_error(db, all_bundles):
         median_final_errors.append(np.median(final_frame_errors))
         first_keyframes.append(first_keyframe)
 
-    plt.figure(figsize=(10, 6))
-    plt.plot(first_keyframes, np.log(np.array(median_init_errors)), label='Initial Error')
-    plt.plot(first_keyframes, np.log(np.array(median_final_errors)), label='Final Error')
+    plt.figure()
+    plt.plot(first_keyframes, np.array(median_init_errors), label='Initial Error')
+    plt.plot(first_keyframes, np.array(median_final_errors), label='Final Error')
     plt.xlabel('Keyframes')
-    plt.ylabel('Median Projection Error in log scale')
-    plt.title('Median Projection Error vs. First Keyframes in log scale')
+    plt.ylabel('Median Projection Error')
+    plt.title('Median Projection Error vs. First Keyframes ')
     plt.legend()
     plt.grid(True)
 
@@ -294,12 +295,30 @@ def get_projection_errors(tracks, bundles, keyframes, db: TrackingDB):
 
 
 def plot_reprojection_error_vs_track_length(tracking_db: TrackingDB, bundles, keyframes):
-    def get_tracks_subset(db: TrackingDB, subset_size: int):
+    # def get_tracks_subset(db: TrackingDB, subset_size: int):
+    #     all_tracks = db.all_tracks()
+    #     eligible_tracks = [track_Id for track_Id in all_tracks if track_length(db, track_Id) > 1]
+    #     if not eligible_tracks:
+    #         return None
+    #     return np.random.choice(eligible_tracks, subset_size)
+    def get_tracks_subset(db: TrackingDB):
         all_tracks = db.all_tracks()
-        eligible_tracks = [track_Id for track_Id in all_tracks if track_length(db, track_Id) > 1]
-        if not eligible_tracks:
-            return None
-        return np.random.choice(eligible_tracks, subset_size)
+        dict_tracks = dict()
+        # eligible_tracks = [track_Id for track_Id in all_tracks if track_length(db, track_Id) > 1]
+        for i in range(2, 31):
+            dict_tracks[i] = []
+        for track_id in all_tracks:
+            length = track_length(db, track_id)
+            if 2 <= length <= 30:
+                dict_tracks[length].append(track_id)
+
+        subset_tracks = []
+        for i in range(2, 31):
+            length = len(dict_tracks[i])
+            subset_length = min(500, length)
+            y = np.random.choice(dict_tracks[i], subset_length).tolist()
+            subset_tracks += y
+        return subset_tracks
 
     def read_kth_camera(k):
         filename = '/Users/mac/67604-SLAM-video-navigation/VAN_ex/dataset/poses/00.txt'
@@ -317,13 +336,13 @@ def plot_reprojection_error_vs_track_length(tracking_db: TrackingDB, bundles, ke
         left_errors = [reprojection_errors[frame][0] for frame in the_frames]
         right_errors = [reprojection_errors[frame][1] for frame in the_frames]
 
-        plt.figure(figsize=(10, 6))
+        plt.figure()
         plt.plot(the_frames, left_errors, label='Left Camera')
         plt.plot(the_frames, right_errors, label='Right Camera')
         plt.xlabel('distance from reference frame')
         plt.ylabel('projection Error')
         plt.xlim(0, max(the_frames))
-        plt.ylim(0, 8)
+        plt.ylim(0, 6)
         if title:
             plt.title(title)
         else:
@@ -332,8 +351,8 @@ def plot_reprojection_error_vs_track_length(tracking_db: TrackingDB, bundles, ke
         plt.grid(True)
 
     num_tracks = int(tracking_db.track_num() * SUBSET_FACTOR)
-    print(f'num_tracks: {num_tracks}')
-    track_ids = get_tracks_subset(tracking_db, num_tracks)
+    track_ids = get_tracks_subset(tracking_db)
+    print(f'num_tracks: {len(track_ids)}')
     distance_dict = {}
     reprojection_erros_left = {}
     reprojection_erros_right = {}
@@ -429,7 +448,7 @@ def plot_trajectory_over_all(db: TrackingDB, result, result_without_closure):
     ba_x, ba_z = zip(*[(loc[0], loc[2]) for loc in bundle_adjustment_locations])
 
     # Plotting
-    plt.figure(figsize=(10, 8))
+    plt.figure()
 
     # Plot each trajectory with a distinct color and label
     plt.scatter(gt_x, gt_z, color='red', marker='o', label='Ground Truth', s=2)
@@ -495,21 +514,21 @@ def Absolute_PnP_estimation_error(db: TrackingDB, result, result_without_closure
     error_labels = ['X Error (m)', 'Y Error (m)', 'Z Error (m)', 'Total Location Error Norm (m)', 'Angle Error (deg)']
     colors = ['blue', 'green', 'red', 'purple', 'orange']
     frame_num = [i for i in range(LEN_DATA_SET)]
-    plt.figure(figsize=(10, 6))
+    plt.figure()
     for i in range(len(errors) - 1):
         plt.plot(frame_num, errors[i], color=colors[i], label=error_labels[i])
 
     # Adding labels and title
-    plt.ylabel('Norm Error in meters')
+    plt.ylabel('Norm Error [m]')
     plt.title('Distance PnP Estimation Errors')
     plt.grid(True, axis='y', linestyle='--', alpha=0.7)
     plt.legend(loc='upper right')
 
-    plt.figure(figsize=(10, 6))
+    plt.figure()
     plt.plot(frame_num, errors[-1], color=colors[-1], label=error_labels[-1])
     # Adding labels and title
     plt.ylabel('Angle Error in degrees')
-    plt.title('Angle PnP Estimation Errors')
+    plt.title('Angle PnP Estimation Errors [deg]')
     plt.grid(True, axis='y', linestyle='--', alpha=0.7)
     plt.legend(loc='upper right')
 
@@ -564,7 +583,7 @@ def absolute_pg(result, result_without_closure):
 
     plt.title("Absolute pose graph estimation errors with loop closure")
     plt.xlabel("Frame number")
-    plt.ylabel("Error (m)")
+    plt.ylabel("Error [m]")
     plt.legend()
     plt.grid()
 
@@ -720,27 +739,27 @@ def plot_relative_error_consequtive_kf(bundles: Dict, db: TrackingDB):
     # errors = [pnp_norm_err, bundle_norm_err, pnp_deg_err, bunle_deg_err]
     errors = [pnp_location_error, bundle_location_error, pnp_angle_error, bundle_angle_error]
     error_labels = ['PNP norm Error (m)', 'bundle norm Error (m)', 'PNP angle Error (deg)', 'bundle angle Error(deg)']
-    colors = ['blue', 'green', 'red', 'purple', 'orange']
+    colors = ['blue', 'purple', 'red', 'green', 'orange']
 
     # plt.bar(error_labels, errors, color=['blue', 'green', 'red', 'yellow'])
-    plt.figure(figsize=(10, 6))
+    plt.figure()
     # for i in range(len(errors)):
     plt.plot(x_axis, errors[0], color=colors[0], label=error_labels[0])
     plt.plot(x_axis, errors[1], color=colors[1], label=error_labels[1])
 
     # Adding labels and title
-    plt.ylabel('Error Magnitude')
+    plt.ylabel('Error [m]')
     plt.title('Relative pose estimation location error of every two consecutive keyframe, PNP and bundles')
     plt.grid(True, axis='y', linestyle='--', alpha=0.7)
     plt.legend()
 
-    plt.figure(figsize=(10, 6))
+    plt.figure()
     # for i in range(len(errors)):
     plt.plot(x_axis, errors[2], color=colors[2], label=error_labels[2])
     plt.plot(x_axis, errors[3], color=colors[3], label=error_labels[3])
 
     # Adding labels and title
-    plt.ylabel('Error Magnitude')
+    plt.ylabel('Error [deg]')
     plt.title('Relative pose estimation angle error of every two consecutive keyframe, PNP and bundles')
     plt.grid(True, axis='y', linestyle='--', alpha=0.7)
     plt.legend()
@@ -776,7 +795,7 @@ def rel_pnp_seq_err(db):
     pnp_global_trans = np.load("/Users/mac/67604-SLAM-video-navigation/final_project/pnp_global_transformations.npy")
     # pnp_global_trans = [pnp_global_trans[i] for i in range(len(pnp_global_trans))]
     accumulate_distance = calculate_dist_traveled(gt)
-    # plt.figure(figsize=(10, 6))
+    # plt.figure()
     all_norm_err = list()
     all_deg_err = list()
     all_x_axis = list()
@@ -826,7 +845,7 @@ def rel_pnp_seq_err(db):
     over_all_angle_err_mean = np.mean(np.array(angles_err_means))
     print(f"Overall mean of angle error is {over_all_angle_err_mean}, PnP")
     # Plotting
-    plt.figure(figsize=(10, 6))
+    plt.figure()
     errors = all_norm_err
     error_labels = [f'PNP norm err of seq length {i}' for i in sub_section_length]
     colors = ['blue', 'green', 'red', 'purple', 'orange']
@@ -837,12 +856,12 @@ def rel_pnp_seq_err(db):
              label='Mean location error', linestyle='-.')
 
     # Adding labels and title
-    plt.ylabel('Norm Error Magnitude')
+    plt.ylabel('Norm Error [m/m]')
     plt.title('Relative pose estimation location error as a function of subsequence length, PNP')
     plt.grid(True, axis='y', linestyle='--', alpha=0.7)
     plt.legend()
 
-    plt.figure(figsize=(10, 6))
+    plt.figure()
     errors = all_deg_err
     error_labels = [f'PNP angle err of seq length {i}' for i in sub_section_length]
 
@@ -852,7 +871,7 @@ def rel_pnp_seq_err(db):
              label='Mean angle error', linestyle='-.')
 
     # Adding labels and title
-    plt.ylabel('Error in degrees')
+    plt.ylabel('Error [deg/m]]')
     plt.title('Relative pose estimation angle error as a function of subsequence length, PNP')
     plt.grid(True, axis='y', linestyle='--', alpha=0.7)
     # plt.ylim(0, 1.5)
@@ -979,7 +998,7 @@ def rel_bundle_seq_err(bundles_list: List):
     print(f"Overall mean of angle error is {over_all_angle_err_mean}, Bundle Adjusment")
 
     # Plotting
-    plt.figure(figsize=(10, 6))
+    plt.figure()
     errors = all_norm_err
     error_labels = [f'Bundle norm err of seq length {i}' for i in sub_section_length]
     colors = ['blue', 'green', 'red', 'purple', 'orange']
@@ -990,12 +1009,12 @@ def rel_bundle_seq_err(bundles_list: List):
              label='Mean location error', linestyle='-.')
 
     # Adding labels and title
-    plt.ylabel('Norm Error Magnitude')
+    plt.ylabel('Norm Error [m/m]')
     plt.title('Relative pose estimation location error as a function of subsequence length, Bundle')
     plt.grid(True, axis='y', linestyle='--', alpha=0.7)
     plt.legend()
 
-    plt.figure(figsize=(10, 6))
+    plt.figure()
     errors = all_deg_err
     error_labels = [f'Bundle angle err of seq length {i}' for i in sub_section_length]
 
@@ -1005,7 +1024,7 @@ def rel_bundle_seq_err(bundles_list: List):
              label='Mean angle error', linestyle='-.')
 
     # Adding labels and title
-    plt.ylabel('Error in degrees')
+    plt.ylabel('Error [deg/m]')
     plt.title('Relative pose estimation angle error as a function of subsequence length, Bundle')
     plt.grid(True, axis='y', linestyle='--', alpha=0.7)
     # plt.ylim(0, 1.5)
@@ -1017,7 +1036,7 @@ def rel_bundle_seq_err(bundles_list: List):
     # names = ['Bundle', 'Loop Closure', 'Without Loop Closure']
     # for j in range(len(all_errors)):
     #     errors = all_errors[j]
-    #     plt.figure(figsize=(10, 6))
+    #     plt.figure()
     #     error_labels = [f'{names[j]} norm error of seq length {k}' for k in sub_section_length]
     #     colors = ['blue', 'green', 'red', 'purple', 'orange']
     #
@@ -1039,7 +1058,7 @@ def rel_bundle_seq_err(bundles_list: List):
     # all_errors = [all_deg_err_bundle, all_deg_err_lc, all_deg_err_no_lc]
     # for j in range(len(all_errors)):
     #     errors = all_errors[j]
-    #     plt.figure(figsize=(10, 6))
+    #     plt.figure()
     #     error_labels = [f'{names[j]} angle error of seq length {k}' for k in sub_section_length]
     #     # error_labels = [f'Bundles angle err of seq length {i}' for i in sub_section_length]
     #     for i in range(len(errors)):
@@ -1059,7 +1078,7 @@ def rel_bundle_seq_err(bundles_list: List):
     #     plt.legend()
 
 
-def calculate_uncertenties_loc_deg(pose_graph, result):
+def calculate_uncertenties_loc_deg(pose_graph, result, lc = True):
     """
     Plot graphs of location uncertainty sizes for the pose graph with and without loop closures.
 
@@ -1070,19 +1089,88 @@ def calculate_uncertenties_loc_deg(pose_graph, result):
     marginals = gtsam.Marginals(pose_graph, result)
     locations_uncertainties = []
     rotations_uncertienties = []
+    whole_cov = []
     poses = gtsam.utilities.allPose3s(result)
     for key in poses.keys():
         marginal_covariance = marginals.marginalCovariance(key)
         locations_uncertainties.append(np.linalg.det(marginal_covariance[3:, 3:]))
         rotations_uncertienties.append(np.linalg.det(marginal_covariance[:3, :3]))
+        # whole_cov.append(np.linalg.det(marginal_covariance))
+    return locations_uncertainties, rotations_uncertienties
+        # x.append(np.linalg.det(marginal_covariance[:, :]))
+    if not lc:
+        index_list = get_index_list(result)
+        cov = None
+        for i in range(1,len(index_list[:])):
+            c1 = index_list[i-1]
+            c2 = index_list[i]
+
+            c1 = gtsam.symbol('c', c1)
+            c2 = gtsam.symbol('c', c2)
+            keys = gtsam.KeyVector()
+            keys.append(c1)
+            keys.append(c2)
+            marginal_information = marginals.jointMarginalInformation(keys)
+            inf_c2_giving_c1 = marginal_information.at(c2, c2)
+            cov_c2_giving_c1 = np.linalg.inv(inf_c2_giving_c1)
+            if cov is None:
+                cov = cov_c2_giving_c1
+                locations_uncertainties.append(np.linalg.det(cov_c2_giving_c1[3:, 3:]))
+                rotations_uncertienties.append(np.linalg.det(cov_c2_giving_c1[:3, :3]))
+            else:
+                cov += cov_c2_giving_c1
+                locations_uncertainties.append(np.linalg.det(cov[3:, 3:]))
+                rotations_uncertienties.append(np.linalg.det(cov[:3, :3]))
+        return locations_uncertainties, rotations_uncertienties
+    else:
+        index_list = get_index_list(result)
+        for c_n in index_list[:]:
+            cn = gtsam.symbol('c', c_n)
+            keys = gtsam.KeyVector()
+            keys.append(cn)
+            covariance = marginals.marginalCovariance(keys)
+            locations_uncertainties.append(np.linalg.det(covariance[3:, 3:]))
+            rotations_uncertienties.append(np.linalg.det(covariance[:3, :3]))
+            continue
+        return locations_uncertainties, rotations_uncertienties
+        #     marginal_information = marginals.jointMarginalInformation(keys)
+        #     inf_c2_giving_c1 = marginal_information.at(c2, c2)
+        #     cov_c2_giving_c1 = np.linalg.inv(inf_c2_giving_c1)
+        # for c_n in index_list[1:]:
+        #     cur_index_list = cov_dijkstra_graph.get_shortest_path(index_list[0], c_n)
+        #     cov = None
+        #     for i in range(1, len(cur_index_list[:])):
+        #         c1 = index_list[i - 1]
+        #         c2 = index_list[i]
+        #
+        #         c1 = gtsam.symbol('c', c1)
+        #         c2 = gtsam.symbol('c', c2)
+        #         keys = gtsam.KeyVector()
+        #         keys.append(c1)
+        #         keys.append(c2)
+        #         marginal_information = marginals.jointMarginalInformation(keys)
+        #         inf_c2_giving_c1 = marginal_information.at(c2, c2)
+        #         cov_c2_giving_c1 = np.linalg.inv(inf_c2_giving_c1)
+        #         if cov is None:
+        #             cov = cov_c2_giving_c1
+        #             continue
+        #             # locations_uncertainties.append(np.linalg.det(cov_c2_giving_c1[3:, 3:]))
+        #             # rotations_uncertienties.append(np.linalg.det(cov_c2_giving_c1[:3, :3]))
+        #         else:
+        #             cov += cov_c2_giving_c1
+        #     locations_uncertainties.append(np.linalg.det(cov[3:, 3:]))
+        #     rotations_uncertienties.append(np.linalg.det(cov[:3, :3]))
+        # return locations_uncertainties, rotations_uncertienties
+        #
+
     # # Calculate determinant of cumulative covariance for each camera frame without loop closures
     # for c_n in index_list[:]:
-    #     # cur_index_list = dijkstra_graph.get_shortest_path(index_list[0], c_n)
-    #     # rel_cov = get_relative_covariance(cur_index_list, marginals)
-    #     locations_uncertainties.append(np.linalg.det(rel_cov[3:, 3:]))
-    #     rotations_uncertienties.append(np.linalg.det(rel_cov[:3, :3]))
+    #     if lc:
+    #         cur_index_list = cov_dijkstra_graph.get_shortest_path(index_list[0], c_n)
+    #     else:
+    #         ind = index_list.index(c_n) + 1
+    #         cur_index_list = index_list[:ind]
 
-    return locations_uncertainties, rotations_uncertienties
 
 
 def plot_loc_deg_uncertainties(pg_lc, pg_no_lc):
@@ -1095,47 +1183,40 @@ def plot_loc_deg_uncertainties(pg_lc, pg_no_lc):
     # Calculate uncertainties for the pose graph with and without loop closures
     loc_uncertainties_lc, rot_uncertainties_lc = calculate_uncertenties_loc_deg(pg_lc.graph, pg_lc.result)
     loc_uncertainties_no_lc, rot_uncertainties_no_lc = calculate_uncertenties_loc_deg(pg_no_lc.graph,
-                                                                                      pg_no_lc.result)
+                                                                                      pg_no_lc.result, lc=False)
 
-    log_loc_uncertainties_lc = np.log(np.array(loc_uncertainties_lc))
-    log_loc_uncertainties_no_lc = np.log(np.array(loc_uncertainties_no_lc))
+    log_loc_uncertainties_lc = np.log10(np.array(loc_uncertainties_lc[:]))
+    log_loc_uncertainties_no_lc = np.log10(np.array(loc_uncertainties_no_lc[:]))
     # log_rot_uncertainties_lc = np.log(np.array(rot_uncertainties_lc))
-    log_rot_uncertainties_lc = np.array(rot_uncertainties_lc)
+    log_rot_uncertainties_lc = np.log10(np.array(rot_uncertainties_lc[:]))
     # log_rot_uncertainties_no_lc = np.log(np.array(rot_uncertainties_no_lc))
-    log_rot_uncertainties_no_lc = np.array(rot_uncertainties_no_lc)
+    log_rot_uncertainties_no_lc = np.log10(np.array(rot_uncertainties_no_lc[:]))
 
     # Plot locations uncertainties with and without loop closures
     plt.figure()
-    plt.plot(get_index_list(pg_lc.result), log_loc_uncertainties_lc,
+    plt.plot(get_index_list(pg_lc.result)[:], log_loc_uncertainties_lc,
              label='log Location uncertainty with loop closures', color='red')
 
-    plt.plot(get_index_list(pg_no_lc.result), log_loc_uncertainties_no_lc,
+    plt.plot(get_index_list(pg_no_lc.result)[:], log_loc_uncertainties_no_lc,
              label='log Location uncertainty without loop closures', color='blue')
 
-    # Plot locations uncertainties with and without loop closures
+    plt.ylabel('log determinant of location part of covariance matrix')
+    plt.xlabel('Frame number')
+    plt.legend()
+    plt.title('Location uncertainties for pose graph with and without loop closures')
+
+    # Plot rotation uncertainties with and without loop closures
     plt.figure()
-    plt.plot(get_index_list(pg_lc.result), log_rot_uncertainties_lc,
+    plt.plot(get_index_list(pg_lc.result)[:], log_rot_uncertainties_lc,
              label='log rotation uncertainty with loop closures', color='red')
-    plt.plot(get_index_list(pg_no_lc.result), log_rot_uncertainties_no_lc,
+    plt.plot(get_index_list(pg_no_lc.result)[:], log_rot_uncertainties_no_lc,
              label='log rotation uncertainty without loop closures', color='blue')
 
-    # # Plot location uncertainties
-    # plt.figure(figsize=(10, 6))
-    # plt.plot(loc_uncertainties_lc, label='Location uncertainty with loop closures')
-    # plt.plot(loc_uncertainties_no_lc, label='Location uncertainty without loop closures')
-    # plt.title('Location uncertainties for pose graph with and without loop closures')
-    # plt.xlabel('Frame number')
-    # plt.ylabel('Determinant of covariance matrix')
-    # plt.legend()
-    #
-    # # Plot rotation uncertainties
-    # plt.figure(figsize=(10, 6))
-    # plt.plot(rot_uncertainties_lc, label='Rotation uncertainty with loop closures')
-    # plt.plot(rot_uncertainties_no_lc, label='Rotation uncertainty without loop closures')
-    # plt.title('Rotation uncertainties for pose graph with and without loop closures')
-    # plt.xlabel('Frame number')
-    # plt.ylabel('Determinant of covariance matrix')
-    # plt.legend()
+    plt.ylabel('log determinant of rotation part of covariance matrix')
+    plt.xlabel('Frame number')
+    plt.legend()
+    plt.title('Rotation uncertainties for pose graph with and without loop closures')
+
 
 
 def load_bundles_list(base_filename):
@@ -1166,23 +1247,28 @@ def run_analysis(db, bundles_list, pose_graph_lc, pose_graph_no_lc):
     print(f"Mean number of frame links: {mean_frame_links}")
     #
     # Compute outgoing tracks
+
+
     outgoing_tracks = compute_outgoing_tracks(db)
 
     # Plot the connectivity graph
     plot_connectivity_graph(outgoing_tracks)
+
     # plt.show()
-    plt.savefig('connectivity_graph.png')
+    # plt.savefig('connectivity_graph.png')
+
     # Compute matches count
     matches_count = compute_matches_count(db)
 
     # Plot the matches count graph
     plot_matches_count_graph(matches_count)
     # plt.show()
-    plt.savefig('matches_count_graph.png')
+    # plt.savefig('matches_count_graph.png')
+
     # Plot the inliers percentage graph
     plot_inliers_percentage_graph(db.frameID_to_inliers_percent)
     # plt.show()
-    plt.savefig('inliers_percentage_graph.png')
+    # plt.savefig('inliers_percentage_graph.png')
     # Calculate track lengths
     track_lengths = calculate_track_lengths(db)
 
@@ -1191,6 +1277,7 @@ def run_analysis(db, bundles_list, pose_graph_lc, pose_graph_no_lc):
     # plt.show()
     # plt.savefig('track_length_histogram.png')
     # Plot the reprojection error vs track length
+
     plot_reprojection_error_vs_track_length(db, bundles_dict, get_keyframes(db))
     # plt.show()
 
@@ -1231,25 +1318,25 @@ def run_analysis(db, bundles_list, pose_graph_lc, pose_graph_no_lc):
     plt.show()
 
 
-if __name__ == '__main__':
-    data_base = TrackingDB()
-    data_base.load("/Users/mac/67604-SLAM-video-navigation/final_project/SIFT_DB")
-    bundles = load_bundles_list("/Users/mac/67604-SLAM-video-navigation/final_project/AKAZE_DB")
-
-    global_bundles_t = np.load("/Users/mac/67604-SLAM-video-navigation/final_project/bundles_global_t.npy")
-    locations = calculate_camera_locations(global_bundles_t)
-    plt.figure()
-    plt.plot(locations[:, 0], locations[:, 2], label='Camera locations')
-    plt.show()
-    # bundles_global_t = np.save("/Users/mac/67604-SLAM-video-navigation/final_project/bundles_global_t.npy", global_bundles_t)
-    rel_bundle_seq_err(bundles)
-    plt.show()
-    pose_graph_lc = PoseGraph.load("/Users/mac/67604-SLAM-video-navigation/final_project/sift_p_graph_with_LC")
-    pose_graph_no_lc = PoseGraph.load("/Users/mac/67604-SLAM-video-navigation/final_project/sift_p_graph")
-
-    run_analysis(data_base, bundles, pose_graph_lc, pose_graph_no_lc)
-    plt.show()
-    exit(0)
+# if __name__ == '__main__':
+#     data_base = TrackingDB()
+#     data_base.load("/Users/mac/67604-SLAM-video-navigation/final_project/SIFT_DB")
+#     bundles = load_bundles_list("/Users/mac/67604-SLAM-video-navigation/final_project/AKAZE_DB")
+#
+#     global_bundles_t = np.load("/Users/mac/67604-SLAM-video-navigation/final_project/bundles_global_t.npy")
+#     locations = calculate_camera_locations(global_bundles_t)
+#     plt.figure()
+#     plt.plot(locations[:, 0], locations[:, 2], label='Camera locations')
+#     plt.show()
+#     # bundles_global_t = np.save("/Users/mac/67604-SLAM-video-navigation/final_project/bundles_global_t.npy", global_bundles_t)
+#     rel_bundle_seq_err(bundles)
+#     plt.show()
+#     pose_graph_lc = PoseGraph.load("/Users/mac/67604-SLAM-video-navigation/final_project/sift_p_graph_with_LC")
+#     pose_graph_no_lc = PoseGraph.load("/Users/mac/67604-SLAM-video-navigation/final_project/sift_p_graph")
+#
+#     run_analysis(data_base, bundles, pose_graph_lc, pose_graph_no_lc)
+#     plt.show()
+#     exit(0)
     # bundles_global_t = []
     # last_t = np.eye(4)
     # for bundle in bundles:
@@ -1266,121 +1353,6 @@ if __name__ == '__main__':
     #     bundles_global_t.append(global_mat)
     # np.save("/Users/mac/67604-SLAM-video-navigation/final_project/bundles_global_t.npy", bundles_global_t)
 
-    # x = get_keyframes(data_base)
-    # print(x)
-    # x = [
-    #     (0, 11), (11, 18), (18, 24), (24, 29), (29, 41), (41, 50), (50, 57), (57, 64), (64, 71), (71, 76), (76, 81), (
-    #         81, 88), (88, 93), (93, 102), (102, 111), (111, 116), (116, 121), (121, 132), (132, 141), (141, 149), (
-    #         149, 156), (156, 163), (163, 169), (169, 175), (175, 181), (181, 188), (188, 195), (195, 202), (202, 209), (
-    #         209, 216), (216, 223), (223, 229), (229, 235), (235, 241), (241, 247), (247, 252), (252, 257), (257, 262), (
-    #         262, 270), (270, 278), (278, 286), (286, 294), (294, 299), (299, 307), (307, 316), (316, 327), (327, 334), (
-    #         334, 341), (341, 352), (352, 360), (360, 367), (367, 373), (373, 379), (379, 385), (385, 391), (391, 396), (
-    #         396, 403), (403, 410), (410, 417), (417, 426), (426, 438), (438, 462), (462, 486), (486, 493), (493, 499), (
-    #         499, 506), (506, 514), (514, 521), (521, 527), (527, 532), (532, 537), (537, 542), (542, 547), (547, 552), (
-    #         552, 557), (557, 562), (562, 567), (567, 572), (572, 577), (577, 582), (582, 587), (587, 592), (592, 597), (
-    #         597, 602), (602, 608), (608, 614), (614, 621), (621, 629), (629, 640), (640, 648), (648, 654), (654, 659), (
-    #         659, 664), (664, 672), (672, 677), (677, 684), (684, 689), (689, 694), (694, 699), (699, 705), (705, 711), (
-    #         711, 717), (717, 723), (723, 729), (729, 736), (736, 744), (744, 753), (753, 762), (762, 770), (770, 777), (
-    #         777, 783), (783, 788), (788, 793), (793, 798), (798, 803), (803, 808), (808, 813), (813, 818), (818, 824), (
-    #         824, 829), (829, 836), (836, 844), (844, 854), (854, 861), (861, 866), (866, 871), (871, 876), (876, 881), (
-    #         881, 886), (886, 891), (891, 896), (896, 901), (901, 907), (907, 912), (912, 917), (917, 922), (922, 927), (
-    #         927, 933), (933, 938), (938, 944), (944, 949), (949, 954), (954, 959), (959, 964), (964, 969), (969, 975), (
-    #         975, 980), (980, 985), (985, 990), (990, 995), (995, 1000), (1000, 1006), (1006, 1013), (1013, 1018), (
-    #         1018, 1029), (1029, 1037), (1037, 1044), (1044, 1051), (1051, 1059), (1059, 1066), (1066, 1071),
-    #     (1071, 1077), (
-    #         1077, 1082), (1082, 1087), (1087, 1092), (1092, 1097), (1097, 1102), (1102, 1107), (1107, 1115),
-    #     (1115, 1124), (
-    #         1124, 1129), (1129, 1138), (1138, 1143), (1143, 1150), (1150, 1160), (1160, 1171), (1171, 1178),
-    #     (1178, 1183), (
-    #         1183, 1194), (1194, 1203), (1203, 1211), (1211, 1218), (1218, 1224), (1224, 1230), (1230, 1235),
-    #     (1235, 1241), (
-    #         1241, 1247), (1247, 1254), (1254, 1261), (1261, 1269), (1269, 1274), (1274, 1285), (1285, 1307),
-    #     (1307, 1317), (
-    #         1317, 1322), (1322, 1329), (1329, 1337), (1337, 1342), (1342, 1347), (1347, 1352), (1352, 1357),
-    #     (1357, 1362), (
-    #         1362, 1367), (1367, 1372), (1372, 1377), (1377, 1382), (1382, 1387), (1387, 1392), (1392, 1397),
-    #     (1397, 1402), (
-    #         1402, 1407), (1407, 1412), (1412, 1417), (1417, 1422), (1422, 1427), (1427, 1432), (1432, 1437),
-    #     (1437, 1442), (
-    #         1442, 1449), (1449, 1457), (1457, 1462), (1462, 1467), (1467, 1472), (1472, 1480), (1480, 1489),
-    #     (1489, 1497), (
-    #         1497, 1504), (1504, 1510), (1510, 1516), (1516, 1521), (1521, 1526), (1526, 1532), (1532, 1537),
-    #     (1537, 1543), (
-    #         1543, 1549), (1549, 1555), (1555, 1561), (1561, 1567), (1567, 1573), (1573, 1578), (1578, 1584),
-    #     (1584, 1590), (
-    #         1590, 1595), (1595, 1601), (1601, 1608), (1608, 1616), (1616, 1624), (1624, 1631), (1631, 1636),
-    #     (1636, 1642), (
-    #         1642, 1648), (1648, 1653), (1653, 1658), (1658, 1663), (1663, 1668), (1668, 1673), (1673, 1679),
-    #     (1679, 1684), (
-    #         1684, 1689), (1689, 1698), (1698, 1707), (1707, 1716), (1716, 1724), (1724, 1729), (1729, 1734),
-    #     (1734, 1741), (
-    #         1741, 1746), (1746, 1753), (1753, 1758), (1758, 1763), (1763, 1769), (1769, 1775), (1775, 1781),
-    #     (1781, 1786), (
-    #         1786, 1791), (1791, 1796), (1796, 1801), (1801, 1806), (1806, 1811), (1811, 1816), (1816, 1821),
-    #     (1821, 1826), (
-    #         1826, 1831), (1831, 1841), (1841, 1856), (1856, 1861), (1861, 1868), (1868, 1876), (1876, 1885),
-    #     (1885, 1892), (
-    #         1892, 1897), (1897, 1902), (1902, 1908), (1908, 1913), (1913, 1918), (1918, 1923), (1923, 1928),
-    #     (1928, 1933), (
-    #         1933, 1938), (1938, 1943), (1943, 1948), (1948, 1953), (1953, 1958), (1958, 1963), (1963, 1968),
-    #     (1968, 1973), (
-    #         1973, 1978), (1978, 1983), (1983, 1989), (1989, 1995), (1995, 2002), (2002, 2011), (2011, 2021),
-    #     (2021, 2028), (
-    #         2028, 2035), (2035, 2042), (2042, 2049), (2049, 2056), (2056, 2062), (2062, 2068), (2068, 2074),
-    #     (2074, 2080), (
-    #         2080, 2086), (2086, 2092), (2092, 2098), (2098, 2104), (2104, 2109), (2109, 2115), (2115, 2121),
-    #     (2121, 2127), (
-    #         2127, 2134), (2134, 2143), (2143, 2159), (2159, 2175), (2175, 2184), (2184, 2191), (2191, 2198),
-    #     (2198, 2205), (
-    #         2205, 2210), (2210, 2215), (2215, 2221), (2221, 2226), (2226, 2234), (2234, 2243), (2243, 2248),
-    #     (2248, 2253), (
-    #         2253, 2260), (2260, 2267), (2267, 2272), (2272, 2278), (2278, 2283), (2283, 2288), (2288, 2293),
-    #     (2293, 2298), (
-    #         2298, 2303), (2303, 2308), (2308, 2313), (2313, 2318), (2318, 2325), (2325, 2334), (2334, 2342),
-    #     (2342, 2347), (
-    #         2347, 2354), (2354, 2362), (2362, 2369), (2369, 2376), (2376, 2382), (2382, 2388), (2388, 2394),
-    #     (2394, 2399), (
-    #         2399, 2404), (2404, 2409), (2409, 2414), (2414, 2419), (2419, 2424), (2424, 2429), (2429, 2434),
-    #     (2434, 2439), (
-    #         2439, 2444), (2444, 2450), (2450, 2456), (2456, 2461), (2461, 2466), (2466, 2471), (2471, 2476),
-    #     (2476, 2482), (
-    #         2482, 2488), (2488, 2494), (2494, 2501), (2501, 2509), (2509, 2517), (2517, 2524), (2524, 2530),
-    #     (2530, 2536), (
-    #         2536, 2541), (2541, 2546), (2546, 2551), (2551, 2556), (2556, 2561), (2561, 2566), (2566, 2572),
-    #     (2572, 2578), (
-    #         2578, 2585), (2585, 2593), (2593, 2600), (2600, 2605), (2605, 2610), (2610, 2615), (2615, 2626),
-    #     (2626, 2634), (
-    #         2634, 2641), (2641, 2647), (2647, 2653), (2653, 2658), (2658, 2664), (2664, 2669), (2669, 2675),
-    #     (2675, 2681), (
-    #         2681, 2687), (2687, 2693), (2693, 2698), (2698, 2704), (2704, 2709), (2709, 2715), (2715, 2720),
-    #     (2720, 2726), (
-    #         2726, 2733), (2733, 2740), (2740, 2747), (2747, 2755), (2755, 2766), (2766, 2776), (2776, 2781),
-    #     (2781, 2786), (
-    #         2786, 2791), (2791, 2796), (2796, 2801), (2801, 2806), (2806, 2811), (2811, 2816), (2816, 2821),
-    #     (2821, 2826), (
-    #         2826, 2831), (2831, 2837), (2837, 2843), (2843, 2848), (2848, 2853), (2853, 2858), (2858, 2863),
-    #     (2863, 2868), (
-    #         2868, 2873), (2873, 2880), (2880, 2887), (2887, 2892), (2892, 2897), (2897, 2902), (2902, 2910),
-    #     (2910, 2915), (
-    #         2915, 2920), (2920, 2927), (2927, 2932), (2932, 2937), (2937, 2942), (2942, 2947), (2947, 2952),
-    #     (2952, 2957), (
-    #         2957, 2962), (2962, 2967), (2967, 2972), (2972, 2977), (2977, 2982), (2982, 2987), (2987, 2993),
-    #     (2993, 3000), (
-    #         3000, 3008), (3008, 3014), (3014, 3019), (3019, 3024), (3024, 3029), (3029, 3037), (3037, 3044),
-    #     (3044, 3050), (
-    #         3050, 3055), (3055, 3060), (3060, 3065), (3065, 3070), (3070, 3075), (3075, 3080), (3080, 3085),
-    #     (3085, 3090), (
-    #         3090, 3095), (3095, 3100), (3100, 3105), (3105, 3110), (3110, 3115), (3115, 3120), (3120, 3125),
-    #     (3125, 3130), (
-    #         3130, 3135), (3135, 3140), (3140, 3145), (3145, 3150), (3150, 3155), (3155, 3160), (3160, 3165),
-    #     (3165, 3170), (
-    #         3170, 3175), (3175, 3180), (3180, 3188), (3188, 3195), (3195, 3202), (3202, 3210), (3210, 3217),
-    #     (3217, 3222), (
-    #         3222, 3227), (3227, 3232), (3232, 3237), (3237, 3242), (3242, 3247), (3247, 3252), (3252, 3257),
-    #     (3257, 3262), (
-    #         3262, 3267), (3267, 3277), (3277, 3288), (3288, 3293), (3293, 3300), (3300, 3305), (3305, 3315),
-    #     (3315, 3325), (
-    #         3325, 3334), (3334, 3340), (3340, 3346), (3346, 3356), (3356, 3359)]
     # key_frames = [0]
     # for i in x:
     #     key_frames.append(i[1])
