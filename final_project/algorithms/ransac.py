@@ -122,6 +122,7 @@ def ransac_pnp(matches_l_l, prev_links, cur_links, inliers_percent = 50):
     """
     # ransac_iterations = 10000  # Number of RANSAC iterations
     ransac_iterations = calc_ransac_iteration(inliers_percent)
+
     filtered_links_cur = []
     filtered_links_prev = []
 
@@ -175,6 +176,7 @@ def ransac_pnp(matches_l_l, prev_links, cur_links, inliers_percent = 50):
         num_inliers = np.sum(points_agreed)
         if num_inliers > best_inliers:
             best_inliers = num_inliers
+            best_T = T
             best_matches_idx = np.where(points_agreed == True)[0]
 
     # Recompute transformation using all inliers
@@ -191,8 +193,13 @@ def ransac_pnp(matches_l_l, prev_links, cur_links, inliers_percent = 50):
     if success:
         # Convert to transformation matrix and compute relative pose
         T = rodriguez_to_mat(rotation_vector, translation_vector)
-        inv_t = get_inverse(T)
-        relative_pose = gtsam.Pose3(gtsam.Rot3(inv_t[:3, :3]), gtsam.Point3(inv_t[:3, 3]))
-        return relative_pose, best_matches_idx, best_inliers
+        # inv_t = get_inverse(T)
+        world_to_camera = gtsam.Pose3(gtsam.Rot3(T[:3, :3]), gtsam.Point3(T[:3, 3]))
+        camera_to_world = world_to_camera.inverse()
+        # relative_pose = gtsam.Pose3(gtsam.Rot3(inv_t[:3, :3]), gtsam.Point3(inv_t[:3, 3]))
+        return camera_to_world, best_matches_idx, best_inliers
     else:
         return None, None, None
+
+
+

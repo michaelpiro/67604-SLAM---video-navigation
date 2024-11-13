@@ -1,4 +1,5 @@
 import os
+import pickle
 from typing import Tuple
 
 import cv2
@@ -10,7 +11,6 @@ from final_project.arguments import DATA_PATH, LEN_DATA_SET
 from final_project.backend.database.tracking_database import TrackingDB
 
 MAC = True
-
 
 
 def rodriguez_to_mat(rvec, tvec):
@@ -95,18 +95,15 @@ def get_ground_truth_locations():
     return cameras_locations2
 
 
-
-
-
 def visualize_track(tracking_db: TrackingDB, trackId: int):
-
     def get_feature_location(tracking_db: TrackingDB, frameId: int, trackId: int) -> Tuple[float, float]:
         link = tracking_db.linkId_to_link[(frameId, trackId)]
         return link.x_left, link.y
+
     frames = tracking_db.frames(trackId)
     print(f"Track {trackId} has {len(frames)} frames")
     plt.figure()
-    num_frames = min(len(frames),8)
+    num_frames = min(len(frames), 8)
     for i in range(0, num_frames, 1):
         # print(f"Frame {frames[i]}")
         frameId = frames[i]
@@ -129,6 +126,19 @@ def visualize_track(tracking_db: TrackingDB, trackId: int):
             plt.title(f"Frame {frameId}, Track {trackId}")
     plt.show()
 
+
+def load(base_filename):
+    """
+    Load serialized data from a pickle file.
+
+    :param base_filename: Base filename without extension.
+    :return: Loaded data object.
+    """
+    filename = base_filename + '.pkl'
+    with open(filename, 'rb') as file:
+        data = pickle.load(file)
+    print('Bundles loaded from', filename)
+    return data
 
 
 K, M1, M2 = read_cameras()

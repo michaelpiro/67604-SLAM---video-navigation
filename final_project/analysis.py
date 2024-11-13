@@ -1,31 +1,23 @@
 import os
 import pickle
-import random
 from typing import Dict, List, Tuple
+import cv2
+import numpy as np
+
+from final_project.Inputs import read_extrinsic_matrices, read_kth_camera
+from final_project.arguments import LEN_DATA_SET, SIFT_DB_PATH, GROUND_TRUTH_PATH, TRANSFORMATIONS_NPY, \
+    PNP_GLOBAL_T_PATH, GRAPHS_DIR_PATH
+from final_project.backend.GTSam.gtsam_utils import get_locations_from_gtsam
 
 import gtsam
 from matplotlib import pyplot as plt
-from gtsam.utils.plot import plot_trajectory
-from final_project import arguments
 from final_project.algorithms.triangulation import linear_least_squares_triangulation
-from final_project.backend.GTSam.pose_graph import PoseGraph
 from final_project.backend.database.tracking_database import TrackingDB
-from final_project.backend.GTSam.gtsam_utils import get_factor_symbols, calculate_global_transformation, save, \
+from final_project.backend.GTSam.gtsam_utils import get_factor_symbols, calculate_global_transformation, \
     get_poses_from_gtsam, get_index_list, T_B_from_T_A, gtsam_pose_to_T, calculate_dist_traveled, \
     calculate_all_pnp_rel_transformation
-from final_project.backend.GTSam.bundle import K_OBJECT, get_keyframes, create_single_bundle, optimize_graph
-from final_project.backend.loop.loop_closure import cov_dijkstra_graph, relative_covariance_dict
-from final_project.backend.GTSam.gtsam_utils import load
+from final_project.backend.GTSam.bundle import K_OBJECT, get_keyframes
 from final_project.arguments import GRAPHS_DIR_PATH
-
-import numpy as np
-
-from final_project.backend.loop.graph import Graph
-from final_project.backend.loop.loop_closure import find_loops, get_locations_ground_truths, \
-    plot_trajectory2D_ground_truth, init_dijksra_graph_relative_covariance_dict, get_relative_covariance, \
-    cov_dijkstra_graph
-
-SUBSET_FACTOR = 0.5
 
 ####################################################################################################
 # TRACKING ANALYSIS
@@ -70,8 +62,10 @@ names_dict = {
     'uncertainty_location': graphs_file_names[23],
     'uncertainty_rotation': graphs_file_names[24]
 }
+
 for i in graphs_file_names:
     names_dict[i] = os.path.join(GRAPHS_DIR_PATH, i)
+
 
 def track_length(tracking_db: TrackingDB, trackId) -> int:
     return len(tracking_db.frames(trackId))
@@ -388,7 +382,6 @@ def plot_reprojection_error_vs_track_length(tracking_db: TrackingDB, bundles, ke
         plt.legend()
         plt.grid(True)
 
-    num_tracks = int(tracking_db.track_num() * SUBSET_FACTOR)
     ground_truth_matrix = read_extrinsic_matrices(n=LEN_DATA_SET)
     track_ids = get_tracks_subset(tracking_db)
     print(f'num_tracks: {len(track_ids)}')
@@ -446,18 +439,6 @@ def plot_reprojection_error_vs_track_length(tracking_db: TrackingDB, bundles, ke
     plt.savefig(names_dict['median_projection_vs_distance_bundle'])
 
 
-import cv2
-import numpy as np
-
-from final_project.Inputs import read_extrinsic_matrices, read_kth_camera
-from final_project.arguments import LEN_DATA_SET, SIFT_DB_PATH, GROUND_TRUTH_PATH, TRANSFORMATIONS_NPY, \
-    PNP_GLOBAL_T_PATH, GRAPHS_DIR_PATH
-from final_project.backend.GTSam.gtsam_utils import get_locations_from_gtsam
-from final_project.backend.database.tracking_database import TrackingDB
-from final_project.backend.GTSam.gtsam_utils import calculate_relative_transformation
-import matplotlib.pyplot as plt
-
-
 def calculate_camera_locations(camera_transformations):
     loc = np.array([0, 0, 0])
     for T in camera_transformations:
@@ -493,8 +474,8 @@ def plot_trajectory_over_all(db: TrackingDB, result, result_without_closure):
     # Plot each trajectory with a distinct color and label
     plt.scatter(gt_x, gt_z, color='red', marker='o', label='Ground Truth', s=2)
     plt.scatter(pnp_x, pnp_z, color='blue', marker='x', label='PNP Transformations', s=2)
-    plt.scatter(lc_x, lc_z, color='green', marker='^', label='Loop Closures', s=2)
-    plt.scatter(ba_x, ba_z, color='purple', marker='s', label='Bundle Adjustment', s=2)
+    plt.scatter(lc_x, lc_z, color='green', marker='^', label='Loop Closures', s=3)
+    plt.scatter(ba_x, ba_z, color='purple', marker='s', label='Bundle Adjustment', s=3)
 
     # Add labels, title, legend, and grid
     plt.xlabel('X Coordinate')
@@ -676,7 +657,6 @@ def absolute_pg(result, result_without_closure):
     plt.grid()
     plt.savefig(names_dict['abs_poseGraph_locations'])
 
-
     plt.figure()
     plt.plot(
         cameras, angles_without_closure,
@@ -788,7 +768,7 @@ def plot_relative_error_consequtive_kf(bundles: Dict, db: TrackingDB):
     # errors = [pnp_norm_err, bundle_norm_err, pnp_deg_err, bunle_deg_err]
     errors = [pnp_location_error, bundle_location_error, pnp_angle_error, bundle_angle_error]
     error_labels = ['PNP norm Error (m)', 'bundle norm Error (m)', 'PNP angle Error (deg)', 'bundle angle Error(deg)']
-    colors = ['blue', 'purple', 'red', 'green', 'orange']
+    colors = ['blue', 'red', 'green', 'orange', 'purple']
 
     # plt.bar(error_labels, errors, color=['blue', 'green', 'red', 'yellow'])
     plt.figure()
@@ -850,8 +830,9 @@ def rel_pnp_seq_err(db):
         if i == 0:
             pnp_global_trans.append(relative_pnp_transformations[i])
         else:
-            global_mat = relative_pnp_transformations[i] @ np.vstack((pnp_global_trans[-1][:3,:], np.array([0, 0, 0, 1])))
-            pnp_global_trans.append(global_mat[:3,:])
+            global_mat = relative_pnp_transformations[i] @ np.vstack(
+                (pnp_global_trans[-1][:3, :], np.array([0, 0, 0, 1])))
+            pnp_global_trans.append(global_mat[:3, :])
     pnp_global_trans = [pnp_global_trans[i] for i in range(len(pnp_global_trans))]
     accumulate_distance = calculate_dist_traveled(gt)
     # plt.figure()
@@ -1361,6 +1342,7 @@ def run_analysis(db, bundles_list, pose_graph_lc, pose_graph_no_lc):
     result_without_lc = pose_graph_no_lc.result
     Absolute_PnP_estimation_error(db, result_with_lc, result_without_lc)
     # plt.show()
+    absolute_pg(result_with_lc, result_without_lc)
 
     # relative error between consecutive keyframes, bundles and pnp
     plot_relative_error_consequtive_kf(bundles_dict, db)
@@ -1379,147 +1361,4 @@ def run_analysis(db, bundles_list, pose_graph_lc, pose_graph_no_lc):
 
     plt.show()
 
-# if __name__ == '__main__':
-#     data_base = TrackingDB()
-#     data_base.load("/Users/mac/67604-SLAM-video-navigation/final_project/SIFT_DB")
-#     bundles = load_bundles_list("/Users/mac/67604-SLAM-video-navigation/final_project/AKAZE_DB")
-#
-#     global_bundles_t = np.load("/Users/mac/67604-SLAM-video-navigation/final_project/bundles_global_t.npy")
-#     locations = calculate_camera_locations(global_bundles_t)
-#     plt.figure()
-#     plt.plot(locations[:, 0], locations[:, 2], label='Camera locations')
-#     plt.show()
-#     # bundles_global_t = np.save("/Users/mac/67604-SLAM-video-navigation/final_project/bundles_global_t.npy", global_bundles_t)
-#     rel_bundle_seq_err(bundles)
-#     plt.show()
-#     pose_graph_lc = PoseGraph.load("/Users/mac/67604-SLAM-video-navigation/final_project/sift_p_graph_with_LC")
-#     pose_graph_no_lc = PoseGraph.load("/Users/mac/67604-SLAM-video-navigation/final_project/sift_p_graph")
-#
-#     run_analysis(data_base, bundles, pose_graph_lc, pose_graph_no_lc)
-#     plt.show()
-#     exit(0)
-# bundles_global_t = []
-# last_t = np.eye(4)
-# for bundle in bundles:
-#     result = bundle["result"]
-#     key_frames = bundle["keyframes"]
-#     first_frame = key_frames[0]
-#     last_frame = key_frames[-1]
-#     pose_last_kf = gtsam_pose_to_T(result.atPose3(gtsam.symbol("c", last_frame)))
-#     first_pose = gtsam_pose_to_T(result.atPose3(gtsam.symbol("c", first_frame)))
-#     est_bundle_displacement = T_B_from_T_A(first_pose, pose_last_kf)
-#
-#     global_mat = est_bundle_displacement @ last_t
-#     last_t = global_mat
-#     bundles_global_t.append(global_mat)
-# np.save("/Users/mac/67604-SLAM-video-navigation/final_project/bundles_global_t.npy", bundles_global_t)
 
-# key_frames = [0]
-# for i in x:
-#     key_frames.append(i[1])
-# matrix = read_extrinsic_matrices()
-# matrix_pnp = np.load("/Users/mac/67604-SLAM-video-navigation/final_project/pnp_global_transformations.npy")
-# matrix = [matrix[i] for i in key_frames]
-# matrix_pnp = [matrix_pnp[i] for i in key_frames]
-# cameras = calculate_camera_locations(matrix)
-# cameras_pnp = calculate_camera_locations(matrix_pnp)
-# cameras_bundle = calculate_camera_locations(bundles_global_t)
-# plt.figure()
-# plt.plot(cameras[:, 0], cameras[:, 2], 'g', label='Ground Truth', linewidth=0.05, marker='o', markersize=0.3)
-# plt.plot(cameras_bundle[:, 0], cameras_bundle[:, 2], 'r', label='Bundle Adjustment', linewidth=0.05, marker='o',
-#          markersize=0.3)
-#
-# # add lines between camera i to bundle i
-# for i in range(len(cameras) - 1):
-#     plt.plot([cameras[i][0], cameras_bundle[i][0]], [cameras[i][2], cameras_bundle[i][2]], 'b', linewidth=0.1)
-#
-# plt.xlabel('X [m]')
-# plt.ylabel('Z [m]')
-# plt.title('ground truth vs bundle adjustment')
-# plt.legend()
-# plt.grid()
-# # plt.show(block=False)
-#
-# plt.figure()
-# plt.plot(cameras[:, 0], cameras[:, 2], 'g', label='Ground Truth', linewidth=0.05, marker='o', markersize=0.3)
-# plt.plot(cameras_pnp[:, 0], cameras_pnp[:, 2], 'r', label='PnP', linewidth=0.05, marker='o', markersize=0.3)
-#
-# # add lines between camera i to bundle i
-# for i in range(len(cameras) - 1):
-#     plt.plot([cameras[i][0], cameras_pnp[i][0]], [cameras[i][2], cameras_pnp[i][2]], 'b', linewidth=0.1)
-# plt.xlabel('X [m]')
-# plt.ylabel('Z [m]')
-# plt.title('ground truth vs PnP')
-# plt.legend()
-# plt.grid()
-# plt.show()
-#
-#
-# #
-#
-# # # plot_reprojection_error_vs_track_length(data_base, bundles, get_keyframes(data_base))
-# #
-# # # absolute_pg(pose_graph_lc.result,pose_graph_no_lc.result)
-# # # Absolute_PnP_estimation_error(data_base, pose_graph_lc.result, pose_graph_no_lc.result)
-# #
-# bundles_dict = {}
-# for i in range(len(bundles)):
-#     bundles_dict[i] = bundles[i]
-# plot_relative_error_consequtive_kf(bundles_dict, data_base)
-# #
-# bundle_rel = np.load("/Users/mac/67604-SLAM-video-navigation/final_project/bundle_rel.npy")
-# # pnp_rel = np.load("/Users/mac/67604-SLAM-video-navigation/final_project/pnp_rel.npy")
-# bundles_vectors = calculate_camera_locations(bundle_rel)
-# plt.figure()
-# plt.plot(cameras_bundle[:, 0], cameras_bundle[:, 2], 'r', label='Bundle Adjustment', linewidth=0.05, marker='o',
-#          markersize=0.3)
-# plt.plot(cameras[:, 0], cameras[:, 2], 'g', label='Ground Truth', linewidth=0.05, marker='o', markersize=0.3)
-#
-# # add lines between camera i to bundle i
-# for i in range(len(bundles_vectors)):
-#     # adds the vector to the point
-#     plt.plot([cameras_bundle[i][0], cameras_bundle[i][0] + bundles_vectors[i][0]],
-#              [cameras_bundle[i][2], cameras_bundle[i][2] + bundles_vectors[i][2]], 'b', linewidth=0.1)
-#
-# for i in range(len(cameras) - 1):
-#     plt.plot([cameras[i][0], cameras_bundle[i][0]], [cameras[i][2], cameras_bundle[i][2]], 'orange', linewidth=0.3)
-#
-# plt.xlabel('X [m]')
-# plt.ylabel('Z [m]')
-# plt.title('ground truth vs bundle adjustment')
-# plt.legend()
-# plt.grid()
-# plt.figure()
-# plt.plot(bundles_vectors[:, 0], bundles_vectors[:, 2], 'r', label='Bundle Adjustment', linewidth=0.05, marker='o',
-#          markersize=0.3)
-#
-#
-# # plot_reprojection_error_vs_track_length(data_base, bundles, get_keyframes(data_base))
-# plt.grid()
-# plt.title('Bundle Adjustment relative error')
-# plt.xlabel('X [m]')
-# plt.ylabel('Z [m]')
-# plt.show()
-#
-# # run_analysis(data_base, bundles, pose_graph_lc, pose_graph_no_lc)
-#
-# # key_frames = get_keyframes(db)
-# # #
-# # all_bundles = []
-# # pose_graph_lc = PoseGraph()
-# # pose_graph_no_lc = PoseGraph()
-# # for key_frame in key_frames:
-# #     first_frame = key_frame[0]
-# #     last_frame = key_frame[1]
-# #     graph, initial, cameras_dict, frames_dict = create_single_bundle(key_frame[0], key_frame[1], db)
-# #     graph, result = optimize_graph(graph, initial)
-# #
-# #     bundle_dict = {'graph': graph, 'initial': initial, 'cameras_dict': cameras_dict, 'frames_dict': frames_dict,
-# #                    'result': result, 'keyframes': key_frame}
-# #     all_bundles.append(bundle_dict)
-# #     pose_graph_lc.add_bundle(bundle_dict)
-# #     pose_graph_no_lc.add_bundle(bundle_dict)
-# #     print(f"Bundle {key_frame} added to the pose graph")
-# # #
-# # # result = pose_graph.optimize()
-# # # pose_graph.save("/Users/mac/67604-SLAM-video-navigation/final_project/sift_p_graph")

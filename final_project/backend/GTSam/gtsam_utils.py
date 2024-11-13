@@ -253,7 +253,14 @@ def get_bundle_global_mat(result, global_transformation):
         location = get_camera_location_from_gtsam(pose)
         rotation = pose.rotation().matrix().T
 
+def get_symbol(index):
+    """
+    Generate a GTSAM symbol for a given camera index.
 
+    :param index: Camera frame index.
+    :return: GTSAM symbol.
+    """
+    return gtsam.symbol('c', index)
 
 def save(data, base_filename):
     """ save TrackingDB to base_filename+'.pkl' file. """
