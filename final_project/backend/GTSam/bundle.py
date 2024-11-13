@@ -41,33 +41,41 @@ def get_bundles_rel_Ts(db: TrackingDB, first_frame_idx, last_frame_idx):
     for i in range(1, last_frame_idx - first_frame_idx + 1):
         current_frame_id = i
         prev_frame_id = current_frame_id - 1
-        last_frame_transform = transformations[prev_frame_id]
 
         # get the relevant tracks
         common_tracks = list(set(db.tracks(current_frame_id)).intersection(
             set(db.tracks(prev_frame_id))))
-        links_last_frame = [db.link(prev_frame_id, track_id) for track_id in common_tracks]
-        links_first_frame = [db.link(current_frame_id, track_id) for track_id in common_tracks]
+        links_prev_frame = [db.link(prev_frame_id, track_id) for track_id in common_tracks]
+        links_curr_frame = [db.link(current_frame_id, track_id) for track_id in common_tracks]
 
         # calculate the transformation between the two frames
         # traingulate the links
-        triangulated_links = triangulate_last_frame(db, P, Q, links_last_frame)
+
+        ############################################
+        # NEW PART
+        # CHANGE THE TRIANGULATION TO USE THE PREV FRAME AS THE REFERENCE
+        triangulated_links = triangulate_last_frame(db, P, Q, links_prev_frame)
+        ############################################
         if len(triangulated_links) < 4:
             raise Exception("Not enough points to triangulate and perform PnP")
         # calculate the transformation
 
-        links_first_frame = np.array(links_first_frame)
-        img_points = np.array([(link.x_left, link.y) for link in links_first_frame])
+        ############################################
+        # NEW PART
+        # CHANGE THE IMG_POINTS TO BE THE CURRENT FRAME POINTS
+        img_points = np.array([(link.x_left, link.y) for link in links_curr_frame])
+        ############################################
         success, rotation_vector, translation_vector = cv2.solvePnP(triangulated_links, img_points, K,
                                                                     distCoeffs=diff_coeff, flags=cv2.SOLVEPNP_EPNP)
 
         T = rodriguez_to_mat(rotation_vector, translation_vector) if success else None
         if T is None:
             raise Exception("PnP failed")
-        # new_trans = get_inverse(inv_t)
-        transformations[current_frame_id] = T @ np.vstack((last_frame_transform[:3, :], np.array([0, 0, 0, 1])))
+
+        prev_frame_transform = transformations[prev_frame_id]
+        transformations[current_frame_id] = T @ np.vstack((prev_frame_transform[:3, :], np.array([0, 0, 0, 1])))
     for camera_id in transformations.keys():
-        transformations[camera_id] = transformations[camera_id][0:3, :]
+        transformations[camera_id] = transformations[camera_id][:3, :]
     return transformations
 
 
@@ -141,12 +149,15 @@ def create_single_bundle(first_frame_idx, last_frame_idx, db):
                     # triangulated_point = triangulate_links([link],P,Q)[0]
                     # gtsam_frame.project(gtsam.Point3(triangulated_point[0]))
                     triangulated_frame_id = frame_id
+                    if reference_triangulated_point[2] < 0:
+                        print(f"Triangulated point negative Z, frame: {frame_id}, track: {track_id}, point: {reference_triangulated_point}")
+                        break
                     assert reference_triangulated_point[2] > 0
 
                     initial_estimate.insert(location_symbol, reference_triangulated_point)
 
                 # Create the factor
-                noise = np.array([1, 1, 1]) + 1.5 * (abs(frame_id-triangulated_frame_id))
+                noise = np.array([1, 1, 1]) + 1.5 * (abs(frame_id - triangulated_frame_id))
                 sigma = gtsam.noiseModel.Diagonal.Sigmas(noise)
                 # sigma = gtsam.noiseModel.Isotropic.Sigma(3, 1.0)
 
@@ -220,32 +231,56 @@ def extract_keyframes(db: TrackingDB, transformations):
     num_frames = len(frames)
     i = 0
     minimum_gap = 5
-    max_dist = 5.0
-    track_losing_factor = 0.1
-    max_gap = 25
+    max_dist = 8.0
+    track_losing_factor = 0.2
+    max_gap = 21
 
-    theta_max = 20
+    theta_max_traveled = 12
+    theta_max_from_initial_pose = 10
 
     while i < num_frames - 1:
-        t_initial = transformations[i]
+        t_init = transformations[i]
         old_tracks = set(db.tracks(i))
-        start = min(i + minimum_gap, num_frames - 1)
+        start = min(i + 1, num_frames - 1)
+        total_angle_diff = 0
+        total_distance = 0
+        prev_transform = transformations[i]
+
         for j in range(start, min(i + max_gap, num_frames)):
-            t2 = transformations[j]
-            dist = calculate_distance_between_keyframes(t_initial, t2)
+            next_transform = transformations[j]
+
+            dist = calculate_distance_between_keyframes(prev_transform, next_transform)
+            angle = calc_locations_angle(prev_transform, next_transform)
+            angle_from_initial = calc_locations_angle(t_init, next_transform)
+
             new_tracks = set(db.tracks(j))
             common_tracks = old_tracks.intersection(new_tracks)
             tracks_ratio = len(common_tracks) / len(old_tracks)
-            old_tracks = new_tracks
-            angle = calc_locations_angle(t_initial, t2)
 
-            if tracks_ratio < track_losing_factor or j == i + max_gap - 1 \
-                    or j == num_frames - 1 or dist > max_dist or angle > theta_max:
+            total_distance += dist
+            total_angle_diff += angle
+
+            # update parameters
+            old_tracks = new_tracks
+            prev_transform = next_transform
+
+            # check if the minimal gap is reached
+            if j < i + minimum_gap:
+                continue
+
+            # check conditions for keyframe selection
+            ratio_cond = tracks_ratio < track_losing_factor
+            max_gap_cond = j == i + max_gap - 1
+            end_cond = j == num_frames - 1
+            dist_cond = total_distance > max_dist
+            angle_traveled_cond = angle > theta_max_traveled
+            angle_from_initial_cond = angle_from_initial > theta_max_from_initial_pose
+
+            if ratio_cond or max_gap_cond or end_cond or dist_cond or angle_traveled_cond or angle_from_initial_cond:
                 keyFrames.append((i, j))
                 i = j
                 break
 
-        # Update i to j+1 if no keyframe was added in the inner loop
         if j == min(i + max_gap - 1, num_frames - 1):
             i = j + 1
 
@@ -299,11 +334,5 @@ def get_all_bundles(db):
         global_transformation = final_matrix @ last_transformation
         global_transformation = global_transformation[:3, :]
         cameras_matrix.append(global_transformation)
-
-    cameras_locations = []
-    for cam in cameras_matrix:
-        rot = cam[:3, :3]
-        t = cam[:3, 3]
-        cameras_locations.append(-rot.T @ t)
 
     return bundles

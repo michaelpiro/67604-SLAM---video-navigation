@@ -98,9 +98,26 @@ def run(serialized_path):
     return db
 
 
+# data_base = TrackingDB()
+# data_base.load("/Users/mac/67604-SLAM-video-navigation/final_project/SIFT_DB")
+#
+# bad_frames = [739, 1012, 1011, 1011, 1012, 1012, 1012, 1011, 1012]
+# bad_tracks = [103896,
+#               141814,
+#               141929,
+#               141930,
+#               141931,
+#               141932,
+#               141933,
+#               142057,
+#               142104]
+#
+# for i in zip(bad_frames, bad_tracks):
+#     link = data_base.link(i[0], i[1])
+#     print(f"Frame: {i[0]}, Track: {i[1]}, link: {link}")
+
 # run("/Users/mac/67604-SLAM-video-navigation/final_project/sift_db_after_change2")
 
 # create_db(
 #     num_frames=LEN_DATA_SET,
 #     db=None)
-

@@ -21,3 +21,5 @@ BUNDLES_PATH = HEAD + '/docs/bundles_AKAZE' #mark bad
 
 TRANSFORMATIONS_NPY = "/Users/mac/67604-SLAM-video-navigation/final_project/pnp_global_transformations.npy"
 PNP_GLOBAL_T_PATH = "/Users/mac/67604-SLAM-video-navigation/final_project/pnp_global_transformations.npy"
+
+GRAPHS_DIR_PATH = START + "/final_project/graphs"

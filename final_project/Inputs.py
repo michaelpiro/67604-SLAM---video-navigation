@@ -36,6 +36,7 @@ def read_cameras():
     m2 = np.linalg.inv(k) @ m2
     return k, m1, m2
 
+
 def read_extrinsic_matrices(file_path=GROUND_TRUTH_PATH, n=LEN_DATA_SET):
     """
     Reads n lines from a file and returns a list of extrinsic camera matrices.
@@ -62,11 +63,13 @@ def read_extrinsic_matrices(file_path=GROUND_TRUTH_PATH, n=LEN_DATA_SET):
 
     return extrinsic_matrices
 
+
 def read_kth_camera(k):
     """
     read the kth camera from the dataset
     """
     filename = GROUND_TRUTH_PATH
+    # print('reading camera from: ', filename)
     with open(filename, 'r') as file:
         for current_line_number, line in enumerate(file, start=1):
             if current_line_number == k:

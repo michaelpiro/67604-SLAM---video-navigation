@@ -117,18 +117,18 @@ def calc_rel_T(db: TrackingDB, frame):
     # get the relevant tracks
     common_tracks = list(set(db.tracks(current_frame_id)).intersection(
         set(db.tracks(prev_frame_id))))
-    links_last_frame = [db.link(prev_frame_id, track_id) for track_id in common_tracks]
-    links_first_frame = [db.link(current_frame_id, track_id) for track_id in common_tracks]
+    links_prev_frame = [db.link(prev_frame_id, track_id) for track_id in common_tracks]
+    links_current_frame = [db.link(current_frame_id, track_id) for track_id in common_tracks]
 
     # calculate the transformation between the two frames
     # traingulate the links
-    triangulated_links = triangulate_last_frame(db, P, Q, links_last_frame)
+    triangulated_links = triangulate_last_frame(db, P, Q, links_prev_frame)
     if len(triangulated_links) < 4:
         raise Exception("Not enough points to triangulate and perform PnP")
     # calculate the transformation
 
-    links_first_frame = np.array(links_first_frame)
-    img_points = np.array([(link.x_left, link.y) for link in links_first_frame])
+    links_current_frame = np.array(links_current_frame)
+    img_points = np.array([(link.x_left, link.y) for link in links_current_frame])
     # links_current_frame = np.array(links_current_frame)
     success, rotation_vector, translation_vector = cv2.solvePnP(triangulated_links, img_points, K,
                                                                 distCoeffs=diff_coeff, flags=cv2.SOLVEPNP_EPNP)
@@ -149,6 +149,14 @@ def calculate_global_transformation(db: TrackingDB, first_frame_idx, last_frame_
             rel_T.append(T)
         else:
             rel_T.append(T @ np.vstack((rel_T[-1], np.array([0, 0, 0, 1]))))
+    return rel_T
+
+def calculate_all_pnp_rel_transformation(db: TrackingDB):
+    """Calculate the global transformation between the first and the last frame."""
+    # transformations = calculate_relative_transformation(db, first_frame_idx, last_frame_idx)
+    rel_T = []
+    for i in range(LEN_DATA_SET):
+        rel_T.append(calc_rel_T(db, i))
     return rel_T
 
 

@@ -1,3 +1,4 @@
+import os
 import pickle
 import random
 from typing import Dict, List, Tuple
@@ -10,10 +11,12 @@ from final_project.algorithms.triangulation import linear_least_squares_triangul
 from final_project.backend.GTSam.pose_graph import PoseGraph
 from final_project.backend.database.tracking_database import TrackingDB
 from final_project.backend.GTSam.gtsam_utils import get_factor_symbols, calculate_global_transformation, save, \
-    get_poses_from_gtsam, get_index_list, T_B_from_T_A, gtsam_pose_to_T, calculate_dist_traveled
+    get_poses_from_gtsam, get_index_list, T_B_from_T_A, gtsam_pose_to_T, calculate_dist_traveled, \
+    calculate_all_pnp_rel_transformation
 from final_project.backend.GTSam.bundle import K_OBJECT, get_keyframes, create_single_bundle, optimize_graph
 from final_project.backend.loop.loop_closure import cov_dijkstra_graph, relative_covariance_dict
 from final_project.backend.GTSam.gtsam_utils import load
+from final_project.arguments import GRAPHS_DIR_PATH
 
 import numpy as np
 
@@ -22,8 +25,6 @@ from final_project.backend.loop.loop_closure import find_loops, get_locations_gr
     plot_trajectory2D_ground_truth, init_dijksra_graph_relative_covariance_dict, get_relative_covariance, \
     cov_dijkstra_graph
 
-
-
 SUBSET_FACTOR = 0.5
 
 ####################################################################################################
@@ -31,6 +32,46 @@ SUBSET_FACTOR = 0.5
 ####################################################################################################
 from final_project.utils import K, M2, M1
 
+graphs_file_names = ['num_matches', 'inliers_percent', 'connectivity', 'histogram', 'trajectory', 'mean_factor_error',
+                     'median_projection_error', 'median_projection_vs_distance_PnP',
+                     'median_projection_vs_distance_bundle',
+                     'abs_PnP_locations', 'abs_PnP_angle', 'abs_poseGraph_locations', 'abs_poseGraph_angle',
+                     'abs_poseGraph_LC_locations', 'abs_poseGraph_LC_angle', 'rel_error_norm_PnP_bundle',
+                     'rel_error_angle_PnP_bundle',
+                     'rel_error_norm_bundle', 'rel_error_angle_bundle', 'rel_sub_section_error_norm_PnP',
+                     'rel_sub_section_error_angle_PnP',
+                     'rel_sub_section_error_norm_bundle', 'rel_sub_section_error_angle_bundle',
+                     'uncertainty_location', 'uncertainty_rotation']
+
+names_dict = {
+    'num_matches': graphs_file_names[0],
+    'inliers_percent': graphs_file_names[1],
+    'connectivity': graphs_file_names[2],
+    'histogram': graphs_file_names[3],
+    'trajectory': graphs_file_names[4],
+    'mean_factor_error': graphs_file_names[5],
+    'median_projection_error': graphs_file_names[6],
+    'median_projection_vs_distance_PnP': graphs_file_names[7],
+    'median_projection_vs_distance_bundle': graphs_file_names[8],
+    'abs_PnP_locations': graphs_file_names[9],
+    'abs_PnP_angle': graphs_file_names[10],
+    'abs_poseGraph_locations': graphs_file_names[11],
+    'abs_poseGraph_angle': graphs_file_names[12],
+    'abs_poseGraph_LC_locations': graphs_file_names[13],
+    'abs_poseGraph_LC_angle': graphs_file_names[14],
+    'rel_error_norm_PnP_bundle': graphs_file_names[15],
+    'rel_error_angle_PnP_bundle': graphs_file_names[16],
+    'rel_error_norm_bundle': graphs_file_names[17],
+    'rel_error_angle_bundle': graphs_file_names[18],
+    'rel_sub_section_error_norm_PnP': graphs_file_names[19],
+    'rel_sub_section_error_angle_PnP': graphs_file_names[20],
+    'rel_sub_section_error_norm_bundle': graphs_file_names[21],
+    'rel_sub_section_error_angle_bundle': graphs_file_names[22],
+    'uncertainty_location': graphs_file_names[23],
+    'uncertainty_rotation': graphs_file_names[24]
+}
+for i in graphs_file_names:
+    names_dict[i] = os.path.join(GRAPHS_DIR_PATH, i)
 
 def track_length(tracking_db: TrackingDB, trackId) -> int:
     return len(tracking_db.frames(trackId))
@@ -94,6 +135,7 @@ def plot_connectivity_graph(outgoing_tracks: Dict[int, int]):
     plt.ylabel('Number of Outgoing Tracks')
     plt.title('Connectivity Graph: Outgoing Tracks per Frame')
     plt.grid(True)
+    plt.savefig(names_dict['connectivity'])
 
 
 def compute_matches_count(tracking_db: TrackingDB) -> Dict[int, int]:
@@ -113,6 +155,7 @@ def plot_matches_count_graph(matches_count: Dict[int, int]):
     plt.ylabel('Number of Matches')
     plt.title('Matches Count Graph: Number of Matches per Frame')
     plt.grid(True)
+    plt.savefig(names_dict['num_matches'])
 
 
 def plot_inliers_percentage_graph(inliers_percentage_dict: Dict[int, float]):
@@ -125,6 +168,7 @@ def plot_inliers_percentage_graph(inliers_percentage_dict: Dict[int, float]):
     plt.ylabel('Percentage of Inliers')
     plt.title('Percentage of Inliers per Frame')
     plt.grid(True)
+    plt.savefig(names_dict['inliers_percent'])
 
 
 def calculate_track_lengths(tracking_db: TrackingDB) -> List[int]:
@@ -142,6 +186,7 @@ def plot_track_length_histogram(track_lengths: List[int]):
 
     plt.yscale('log')
     plt.xlim((0, 150))
+    plt.savefig(names_dict['histogram'])
 
 
 def plot_mean_factor_error(all_bundles):
@@ -169,6 +214,7 @@ def plot_mean_factor_error(all_bundles):
     plt.title('Mean Factor Error vs. First Keyframe ID')
     plt.legend()
     plt.grid(True)
+    plt.savefig(names_dict['mean_factor_error'])
 
 
 def calculate_frame_projection_errors(db: TrackingDB, graph: gtsam.NonlinearFactorGraph, initial: gtsam.Values,
@@ -240,6 +286,7 @@ def plot_median_projection_error(db, all_bundles):
     plt.title('Median Projection Error vs. First Keyframes ')
     plt.legend()
     plt.grid(True)
+    plt.savefig(names_dict['median_projection_error'])
 
 
 def map_camera_to_bundle(camera: int, keyframes):
@@ -322,7 +369,6 @@ def plot_reprojection_error_vs_track_length(tracking_db: TrackingDB, bundles, ke
             subset_tracks += y
         return subset_tracks
 
-
     def plot_reprojection_errors(reprojection_errors: Dict[int, Tuple[float, float]], title=None):
         the_frames = sorted(reprojection_errors.keys())
         left_errors = [reprojection_errors[frame][0] for frame in the_frames]
@@ -343,6 +389,7 @@ def plot_reprojection_error_vs_track_length(tracking_db: TrackingDB, bundles, ke
         plt.grid(True)
 
     num_tracks = int(tracking_db.track_num() * SUBSET_FACTOR)
+    ground_truth_matrix = read_extrinsic_matrices(n=LEN_DATA_SET)
     track_ids = get_tracks_subset(tracking_db)
     print(f'num_tracks: {len(track_ids)}')
     distance_dict = {}
@@ -351,7 +398,7 @@ def plot_reprojection_error_vs_track_length(tracking_db: TrackingDB, bundles, ke
     for trackId in track_ids:
         track_last_frame = tracking_db.last_frame_of_track(trackId)
         frames = tracking_db.frames(trackId)
-        left_camera_mat = read_kth_camera(track_last_frame)
+        left_camera_mat = ground_truth_matrix[track_last_frame]
         link = tracking_db.link(track_last_frame, trackId)
 
         p = K @ left_camera_mat
@@ -363,7 +410,7 @@ def plot_reprojection_error_vs_track_length(tracking_db: TrackingDB, bundles, ke
         projections = {}
 
         for frameId in frames:
-            left_camera_mat = read_kth_camera(frameId)
+            left_camera_mat = ground_truth_matrix[frameId]
             p = K @ left_camera_mat
             q = K @ M2 @ np.vstack((left_camera_mat, np.array([0, 0, 0, 1])))
             projection_left, projection_right = ((p @ world_point_4d).T, (q @ world_point_4d).T)
@@ -388,7 +435,7 @@ def plot_reprojection_error_vs_track_length(tracking_db: TrackingDB, bundles, ke
         distance_dict[key] = np.median(reprojection_erros_left[key]), np.median(reprojection_erros_right[key])
 
     plot_reprojection_errors(distance_dict, 'PnP projection Error vs track length')
-    # plt.savefig('reprojection_error_vs_track_length_1.png')
+    plt.savefig(names_dict['median_projection_vs_distance_PnP'])
 
     rep_left, rep_right = get_projection_errors(track_ids, bundles, keyframes, tracking_db)
     dist_keys = list(rep_left.keys())
@@ -396,7 +443,7 @@ def plot_reprojection_error_vs_track_length(tracking_db: TrackingDB, bundles, ke
         distance_dict[key] = np.median(rep_left[key]), np.median(rep_right[key])
 
     plot_reprojection_errors(distance_dict, 'Bundle Adjustment projection Error vs track length')
-    # plt.savefig('reprojection_error_vs_track_length_2.png')
+    plt.savefig(names_dict['median_projection_vs_distance_bundle'])
 
 
 import cv2
@@ -404,7 +451,7 @@ import numpy as np
 
 from final_project.Inputs import read_extrinsic_matrices, read_kth_camera
 from final_project.arguments import LEN_DATA_SET, SIFT_DB_PATH, GROUND_TRUTH_PATH, TRANSFORMATIONS_NPY, \
-    PNP_GLOBAL_T_PATH
+    PNP_GLOBAL_T_PATH, GRAPHS_DIR_PATH
 from final_project.backend.GTSam.gtsam_utils import get_locations_from_gtsam
 from final_project.backend.database.tracking_database import TrackingDB
 from final_project.backend.GTSam.gtsam_utils import calculate_relative_transformation
@@ -456,6 +503,7 @@ def plot_trajectory_over_all(db: TrackingDB, result, result_without_closure):
     plt.legend(loc='upper right')  # Add legend for different trajectories
     plt.grid(True)
     plt.axis('equal')  # Ensure the aspect ratio is equal
+    plt.savefig(names_dict['trajectory'])
 
 
 def calculate_error_deg(estimated_Transformations, ground_truth_transformations):
@@ -516,6 +564,7 @@ def Absolute_PnP_estimation_error(db: TrackingDB, result, result_without_closure
     plt.title('Distance PnP Estimation Errors')
     plt.grid(True, axis='y', linestyle='--', alpha=0.7)
     plt.legend(loc='upper right')
+    plt.savefig(names_dict['abs_PnP_locations'])
 
     plt.figure()
     plt.plot(frame_num, errors[-1], color=colors[-1], label=error_labels[-1])
@@ -524,6 +573,7 @@ def Absolute_PnP_estimation_error(db: TrackingDB, result, result_without_closure
     plt.title('Angle PnP Estimation Errors [deg]')
     plt.grid(True, axis='y', linestyle='--', alpha=0.7)
     plt.legend(loc='upper right')
+    plt.savefig(names_dict['abs_PnP_angle'])
 
 
 def absolute_pg(result, result_without_closure):
@@ -579,6 +629,7 @@ def absolute_pg(result, result_without_closure):
     plt.ylabel("Error [m]")
     plt.legend()
     plt.grid()
+    plt.savefig(names_dict['abs_poseGraph_LC_locations'])
 
     plt.figure()
     plt.plot(
@@ -590,6 +641,7 @@ def absolute_pg(result, result_without_closure):
     plt.ylabel("Error (deg)")
     plt.legend()
     plt.grid()
+    plt.savefig(names_dict['abs_poseGraph_LC_angle'])
 
     # Plot location errors without loop closure
     plt.figure()
@@ -622,6 +674,8 @@ def absolute_pg(result, result_without_closure):
     plt.ylabel("Error (m)")
     plt.legend()
     plt.grid()
+    plt.savefig(names_dict['abs_poseGraph_locations'])
+
 
     plt.figure()
     plt.plot(
@@ -633,6 +687,7 @@ def absolute_pg(result, result_without_closure):
     plt.ylabel("Error (deg)")
     plt.legend()
     plt.grid()
+    plt.savefig(names_dict['abs_poseGraph_angle'])
 
 
 def calculate_norm_error(estimated_transformtions, ground_truth_transformations):
@@ -724,7 +779,6 @@ def plot_relative_error_consequtive_kf(bundles: Dict, db: TrackingDB):
     # np.save("/Users/mac/67604-SLAM-video-navigation/final_project/bundle_rel.npy", bundle_rel)
     # np.save("/Users/mac/67604-SLAM-video-navigation/final_project/pnp_rel.npy", pnp_rel)
 
-
     # pnp_norm_err = calculate_norm_error(pnp_rel, gt_rel)
     # bundle_norm_err = calculate_norm_error(bundle_rel, gt_rel)
     # pnp_deg_err = calculate_error_deg(pnp_rel, gt_rel)
@@ -747,6 +801,7 @@ def plot_relative_error_consequtive_kf(bundles: Dict, db: TrackingDB):
     plt.title('Relative pose estimation location error of every two consecutive keyframe, PNP and bundles')
     plt.grid(True, axis='y', linestyle='--', alpha=0.7)
     plt.legend()
+    plt.savefig(names_dict['rel_error_norm_PnP_bundle'])
 
     plt.figure()
     # for i in range(len(errors)):
@@ -758,6 +813,7 @@ def plot_relative_error_consequtive_kf(bundles: Dict, db: TrackingDB):
     plt.title('Relative pose estimation angle error of every two consecutive keyframe, PNP and bundles')
     plt.grid(True, axis='y', linestyle='--', alpha=0.7)
     plt.legend()
+    plt.savefig(names_dict['rel_error_angle_PnP_bundle'])
 
     # Show plot
 
@@ -786,8 +842,16 @@ def rel_pnp_seq_err(db):
 
     sub_section_length = [100, 400, 800]
     gt = read_extrinsic_matrices(GROUND_TRUTH_PATH, LEN_DATA_SET)
-    pnp_global_trans = calculate_relative_transformation(db, 1, LEN_DATA_SET)
+    # pnp_global_trans = calculate_relative_transformation(db, 1, LEN_DATA_SET)
     # pnp_global_trans = np.load(PNP_GLOBAL_T_PATH)
+    relative_pnp_transformations = calculate_all_pnp_rel_transformation(db)
+    pnp_global_trans = []
+    for i in range(len(relative_pnp_transformations)):
+        if i == 0:
+            pnp_global_trans.append(relative_pnp_transformations[i])
+        else:
+            global_mat = relative_pnp_transformations[i] @ np.vstack((pnp_global_trans[-1][:3,:], np.array([0, 0, 0, 1])))
+            pnp_global_trans.append(global_mat[:3,:])
     pnp_global_trans = [pnp_global_trans[i] for i in range(len(pnp_global_trans))]
     accumulate_distance = calculate_dist_traveled(gt)
     # plt.figure()
@@ -855,6 +919,7 @@ def rel_pnp_seq_err(db):
     plt.title('Relative pose estimation location error as a function of subsequence length, PNP')
     plt.grid(True, axis='y', linestyle='--', alpha=0.7)
     plt.legend()
+    plt.savefig(names_dict['rel_sub_section_error_norm_PnP'])
 
     plt.figure()
     errors = all_deg_err
@@ -871,6 +936,7 @@ def rel_pnp_seq_err(db):
     plt.grid(True, axis='y', linestyle='--', alpha=0.7)
     # plt.ylim(0, 1.5)
     plt.legend()
+    plt.savefig(names_dict['rel_sub_section_error_angle_PnP'])
 
 
 def get_closest_keyframe_index(key_frame_list, frame_index):
@@ -1008,6 +1074,7 @@ def rel_bundle_seq_err(bundles_list: List):
     plt.title('Relative pose estimation location error as a function of subsequence length, Bundle')
     plt.grid(True, axis='y', linestyle='--', alpha=0.7)
     plt.legend()
+    plt.savefig(names_dict['rel_sub_section_error_norm_bundle'])
 
     plt.figure()
     errors = all_deg_err
@@ -1024,6 +1091,7 @@ def rel_bundle_seq_err(bundles_list: List):
     plt.grid(True, axis='y', linestyle='--', alpha=0.7)
     # plt.ylim(0, 1.5)
     plt.legend()
+    plt.savefig(names_dict['rel_sub_section_error_angle_bundle'])
 
     # # Plotting
     #
@@ -1073,7 +1141,7 @@ def rel_bundle_seq_err(bundles_list: List):
     #     plt.legend()
 
 
-def calculate_uncertenties_loc_deg(pose_graph, result, lc = True):
+def calculate_uncertenties_loc_deg(pose_graph, result, lc=True):
     """
     Plot graphs of location uncertainty sizes for the pose graph with and without loop closures.
 
@@ -1092,12 +1160,12 @@ def calculate_uncertenties_loc_deg(pose_graph, result, lc = True):
         rotations_uncertienties.append(np.linalg.det(marginal_covariance[:3, :3]))
         # whole_cov.append(np.linalg.det(marginal_covariance))
     return locations_uncertainties, rotations_uncertienties
-        # x.append(np.linalg.det(marginal_covariance[:, :]))
+    # x.append(np.linalg.det(marginal_covariance[:, :]))
     if not lc:
         index_list = get_index_list(result)
         cov = None
-        for i in range(1,len(index_list[:])):
-            c1 = index_list[i-1]
+        for i in range(1, len(index_list[:])):
+            c1 = index_list[i - 1]
             c2 = index_list[i]
 
             c1 = gtsam.symbol('c', c1)
@@ -1167,7 +1235,6 @@ def calculate_uncertenties_loc_deg(pose_graph, result, lc = True):
     #         cur_index_list = index_list[:ind]
 
 
-
 def plot_loc_deg_uncertainties(pg_lc, pg_no_lc):
     """
     Plot location and rotation uncertainties for the pose graph with and without loop closures.
@@ -1199,6 +1266,7 @@ def plot_loc_deg_uncertainties(pg_lc, pg_no_lc):
     plt.xlabel('Frame number')
     plt.legend()
     plt.title('Location uncertainties for pose graph with and without loop closures')
+    plt.savefig(names_dict['uncertainty_location'])
 
     # Plot rotation uncertainties with and without loop closures
     plt.figure()
@@ -1211,7 +1279,7 @@ def plot_loc_deg_uncertainties(pg_lc, pg_no_lc):
     plt.xlabel('Frame number')
     plt.legend()
     plt.title('Rotation uncertainties for pose graph with and without loop closures')
-
+    plt.savefig(names_dict['uncertainty_rotation'])
 
 
 def load_bundles_list(base_filename):
@@ -1242,7 +1310,6 @@ def run_analysis(db, bundles_list, pose_graph_lc, pose_graph_no_lc):
     print(f"Mean number of frame links: {mean_frame_links}")
     #
     # Compute outgoing tracks
-
 
     outgoing_tracks = compute_outgoing_tracks(db)
 
@@ -1312,7 +1379,6 @@ def run_analysis(db, bundles_list, pose_graph_lc, pose_graph_no_lc):
 
     plt.show()
 
-
 # if __name__ == '__main__':
 #     data_base = TrackingDB()
 #     data_base.load("/Users/mac/67604-SLAM-video-navigation/final_project/SIFT_DB")
@@ -1332,128 +1398,128 @@ def run_analysis(db, bundles_list, pose_graph_lc, pose_graph_no_lc):
 #     run_analysis(data_base, bundles, pose_graph_lc, pose_graph_no_lc)
 #     plt.show()
 #     exit(0)
-    # bundles_global_t = []
-    # last_t = np.eye(4)
-    # for bundle in bundles:
-    #     result = bundle["result"]
-    #     key_frames = bundle["keyframes"]
-    #     first_frame = key_frames[0]
-    #     last_frame = key_frames[-1]
-    #     pose_last_kf = gtsam_pose_to_T(result.atPose3(gtsam.symbol("c", last_frame)))
-    #     first_pose = gtsam_pose_to_T(result.atPose3(gtsam.symbol("c", first_frame)))
-    #     est_bundle_displacement = T_B_from_T_A(first_pose, pose_last_kf)
-    #
-    #     global_mat = est_bundle_displacement @ last_t
-    #     last_t = global_mat
-    #     bundles_global_t.append(global_mat)
-    # np.save("/Users/mac/67604-SLAM-video-navigation/final_project/bundles_global_t.npy", bundles_global_t)
+# bundles_global_t = []
+# last_t = np.eye(4)
+# for bundle in bundles:
+#     result = bundle["result"]
+#     key_frames = bundle["keyframes"]
+#     first_frame = key_frames[0]
+#     last_frame = key_frames[-1]
+#     pose_last_kf = gtsam_pose_to_T(result.atPose3(gtsam.symbol("c", last_frame)))
+#     first_pose = gtsam_pose_to_T(result.atPose3(gtsam.symbol("c", first_frame)))
+#     est_bundle_displacement = T_B_from_T_A(first_pose, pose_last_kf)
+#
+#     global_mat = est_bundle_displacement @ last_t
+#     last_t = global_mat
+#     bundles_global_t.append(global_mat)
+# np.save("/Users/mac/67604-SLAM-video-navigation/final_project/bundles_global_t.npy", bundles_global_t)
 
-    # key_frames = [0]
-    # for i in x:
-    #     key_frames.append(i[1])
-    # matrix = read_extrinsic_matrices()
-    # matrix_pnp = np.load("/Users/mac/67604-SLAM-video-navigation/final_project/pnp_global_transformations.npy")
-    # matrix = [matrix[i] for i in key_frames]
-    # matrix_pnp = [matrix_pnp[i] for i in key_frames]
-    # cameras = calculate_camera_locations(matrix)
-    # cameras_pnp = calculate_camera_locations(matrix_pnp)
-    # cameras_bundle = calculate_camera_locations(bundles_global_t)
-    # plt.figure()
-    # plt.plot(cameras[:, 0], cameras[:, 2], 'g', label='Ground Truth', linewidth=0.05, marker='o', markersize=0.3)
-    # plt.plot(cameras_bundle[:, 0], cameras_bundle[:, 2], 'r', label='Bundle Adjustment', linewidth=0.05, marker='o',
-    #          markersize=0.3)
-    #
-    # # add lines between camera i to bundle i
-    # for i in range(len(cameras) - 1):
-    #     plt.plot([cameras[i][0], cameras_bundle[i][0]], [cameras[i][2], cameras_bundle[i][2]], 'b', linewidth=0.1)
-    #
-    # plt.xlabel('X [m]')
-    # plt.ylabel('Z [m]')
-    # plt.title('ground truth vs bundle adjustment')
-    # plt.legend()
-    # plt.grid()
-    # # plt.show(block=False)
-    #
-    # plt.figure()
-    # plt.plot(cameras[:, 0], cameras[:, 2], 'g', label='Ground Truth', linewidth=0.05, marker='o', markersize=0.3)
-    # plt.plot(cameras_pnp[:, 0], cameras_pnp[:, 2], 'r', label='PnP', linewidth=0.05, marker='o', markersize=0.3)
-    #
-    # # add lines between camera i to bundle i
-    # for i in range(len(cameras) - 1):
-    #     plt.plot([cameras[i][0], cameras_pnp[i][0]], [cameras[i][2], cameras_pnp[i][2]], 'b', linewidth=0.1)
-    # plt.xlabel('X [m]')
-    # plt.ylabel('Z [m]')
-    # plt.title('ground truth vs PnP')
-    # plt.legend()
-    # plt.grid()
-    # plt.show()
-    #
-    #
-    # #
-    #
-    # # # plot_reprojection_error_vs_track_length(data_base, bundles, get_keyframes(data_base))
-    # #
-    # # # absolute_pg(pose_graph_lc.result,pose_graph_no_lc.result)
-    # # # Absolute_PnP_estimation_error(data_base, pose_graph_lc.result, pose_graph_no_lc.result)
-    # #
-    # bundles_dict = {}
-    # for i in range(len(bundles)):
-    #     bundles_dict[i] = bundles[i]
-    # plot_relative_error_consequtive_kf(bundles_dict, data_base)
-    # #
-    # bundle_rel = np.load("/Users/mac/67604-SLAM-video-navigation/final_project/bundle_rel.npy")
-    # # pnp_rel = np.load("/Users/mac/67604-SLAM-video-navigation/final_project/pnp_rel.npy")
-    # bundles_vectors = calculate_camera_locations(bundle_rel)
-    # plt.figure()
-    # plt.plot(cameras_bundle[:, 0], cameras_bundle[:, 2], 'r', label='Bundle Adjustment', linewidth=0.05, marker='o',
-    #          markersize=0.3)
-    # plt.plot(cameras[:, 0], cameras[:, 2], 'g', label='Ground Truth', linewidth=0.05, marker='o', markersize=0.3)
-    #
-    # # add lines between camera i to bundle i
-    # for i in range(len(bundles_vectors)):
-    #     # adds the vector to the point
-    #     plt.plot([cameras_bundle[i][0], cameras_bundle[i][0] + bundles_vectors[i][0]],
-    #              [cameras_bundle[i][2], cameras_bundle[i][2] + bundles_vectors[i][2]], 'b', linewidth=0.1)
-    #
-    # for i in range(len(cameras) - 1):
-    #     plt.plot([cameras[i][0], cameras_bundle[i][0]], [cameras[i][2], cameras_bundle[i][2]], 'orange', linewidth=0.3)
-    #
-    # plt.xlabel('X [m]')
-    # plt.ylabel('Z [m]')
-    # plt.title('ground truth vs bundle adjustment')
-    # plt.legend()
-    # plt.grid()
-    # plt.figure()
-    # plt.plot(bundles_vectors[:, 0], bundles_vectors[:, 2], 'r', label='Bundle Adjustment', linewidth=0.05, marker='o',
-    #          markersize=0.3)
-    #
-    #
-    # # plot_reprojection_error_vs_track_length(data_base, bundles, get_keyframes(data_base))
-    # plt.grid()
-    # plt.title('Bundle Adjustment relative error')
-    # plt.xlabel('X [m]')
-    # plt.ylabel('Z [m]')
-    # plt.show()
-    #
-    # # run_analysis(data_base, bundles, pose_graph_lc, pose_graph_no_lc)
-    #
-    # # key_frames = get_keyframes(db)
-    # # #
-    # # all_bundles = []
-    # # pose_graph_lc = PoseGraph()
-    # # pose_graph_no_lc = PoseGraph()
-    # # for key_frame in key_frames:
-    # #     first_frame = key_frame[0]
-    # #     last_frame = key_frame[1]
-    # #     graph, initial, cameras_dict, frames_dict = create_single_bundle(key_frame[0], key_frame[1], db)
-    # #     graph, result = optimize_graph(graph, initial)
-    # #
-    # #     bundle_dict = {'graph': graph, 'initial': initial, 'cameras_dict': cameras_dict, 'frames_dict': frames_dict,
-    # #                    'result': result, 'keyframes': key_frame}
-    # #     all_bundles.append(bundle_dict)
-    # #     pose_graph_lc.add_bundle(bundle_dict)
-    # #     pose_graph_no_lc.add_bundle(bundle_dict)
-    # #     print(f"Bundle {key_frame} added to the pose graph")
-    # # #
-    # # # result = pose_graph.optimize()
-    # # # pose_graph.save("/Users/mac/67604-SLAM-video-navigation/final_project/sift_p_graph")
+# key_frames = [0]
+# for i in x:
+#     key_frames.append(i[1])
+# matrix = read_extrinsic_matrices()
+# matrix_pnp = np.load("/Users/mac/67604-SLAM-video-navigation/final_project/pnp_global_transformations.npy")
+# matrix = [matrix[i] for i in key_frames]
+# matrix_pnp = [matrix_pnp[i] for i in key_frames]
+# cameras = calculate_camera_locations(matrix)
+# cameras_pnp = calculate_camera_locations(matrix_pnp)
+# cameras_bundle = calculate_camera_locations(bundles_global_t)
+# plt.figure()
+# plt.plot(cameras[:, 0], cameras[:, 2], 'g', label='Ground Truth', linewidth=0.05, marker='o', markersize=0.3)
+# plt.plot(cameras_bundle[:, 0], cameras_bundle[:, 2], 'r', label='Bundle Adjustment', linewidth=0.05, marker='o',
+#          markersize=0.3)
+#
+# # add lines between camera i to bundle i
+# for i in range(len(cameras) - 1):
+#     plt.plot([cameras[i][0], cameras_bundle[i][0]], [cameras[i][2], cameras_bundle[i][2]], 'b', linewidth=0.1)
+#
+# plt.xlabel('X [m]')
+# plt.ylabel('Z [m]')
+# plt.title('ground truth vs bundle adjustment')
+# plt.legend()
+# plt.grid()
+# # plt.show(block=False)
+#
+# plt.figure()
+# plt.plot(cameras[:, 0], cameras[:, 2], 'g', label='Ground Truth', linewidth=0.05, marker='o', markersize=0.3)
+# plt.plot(cameras_pnp[:, 0], cameras_pnp[:, 2], 'r', label='PnP', linewidth=0.05, marker='o', markersize=0.3)
+#
+# # add lines between camera i to bundle i
+# for i in range(len(cameras) - 1):
+#     plt.plot([cameras[i][0], cameras_pnp[i][0]], [cameras[i][2], cameras_pnp[i][2]], 'b', linewidth=0.1)
+# plt.xlabel('X [m]')
+# plt.ylabel('Z [m]')
+# plt.title('ground truth vs PnP')
+# plt.legend()
+# plt.grid()
+# plt.show()
+#
+#
+# #
+#
+# # # plot_reprojection_error_vs_track_length(data_base, bundles, get_keyframes(data_base))
+# #
+# # # absolute_pg(pose_graph_lc.result,pose_graph_no_lc.result)
+# # # Absolute_PnP_estimation_error(data_base, pose_graph_lc.result, pose_graph_no_lc.result)
+# #
+# bundles_dict = {}
+# for i in range(len(bundles)):
+#     bundles_dict[i] = bundles[i]
+# plot_relative_error_consequtive_kf(bundles_dict, data_base)
+# #
+# bundle_rel = np.load("/Users/mac/67604-SLAM-video-navigation/final_project/bundle_rel.npy")
+# # pnp_rel = np.load("/Users/mac/67604-SLAM-video-navigation/final_project/pnp_rel.npy")
+# bundles_vectors = calculate_camera_locations(bundle_rel)
+# plt.figure()
+# plt.plot(cameras_bundle[:, 0], cameras_bundle[:, 2], 'r', label='Bundle Adjustment', linewidth=0.05, marker='o',
+#          markersize=0.3)
+# plt.plot(cameras[:, 0], cameras[:, 2], 'g', label='Ground Truth', linewidth=0.05, marker='o', markersize=0.3)
+#
+# # add lines between camera i to bundle i
+# for i in range(len(bundles_vectors)):
+#     # adds the vector to the point
+#     plt.plot([cameras_bundle[i][0], cameras_bundle[i][0] + bundles_vectors[i][0]],
+#              [cameras_bundle[i][2], cameras_bundle[i][2] + bundles_vectors[i][2]], 'b', linewidth=0.1)
+#
+# for i in range(len(cameras) - 1):
+#     plt.plot([cameras[i][0], cameras_bundle[i][0]], [cameras[i][2], cameras_bundle[i][2]], 'orange', linewidth=0.3)
+#
+# plt.xlabel('X [m]')
+# plt.ylabel('Z [m]')
+# plt.title('ground truth vs bundle adjustment')
+# plt.legend()
+# plt.grid()
+# plt.figure()
+# plt.plot(bundles_vectors[:, 0], bundles_vectors[:, 2], 'r', label='Bundle Adjustment', linewidth=0.05, marker='o',
+#          markersize=0.3)
+#
+#
+# # plot_reprojection_error_vs_track_length(data_base, bundles, get_keyframes(data_base))
+# plt.grid()
+# plt.title('Bundle Adjustment relative error')
+# plt.xlabel('X [m]')
+# plt.ylabel('Z [m]')
+# plt.show()
+#
+# # run_analysis(data_base, bundles, pose_graph_lc, pose_graph_no_lc)
+#
+# # key_frames = get_keyframes(db)
+# # #
+# # all_bundles = []
+# # pose_graph_lc = PoseGraph()
+# # pose_graph_no_lc = PoseGraph()
+# # for key_frame in key_frames:
+# #     first_frame = key_frame[0]
+# #     last_frame = key_frame[1]
+# #     graph, initial, cameras_dict, frames_dict = create_single_bundle(key_frame[0], key_frame[1], db)
+# #     graph, result = optimize_graph(graph, initial)
+# #
+# #     bundle_dict = {'graph': graph, 'initial': initial, 'cameras_dict': cameras_dict, 'frames_dict': frames_dict,
+# #                    'result': result, 'keyframes': key_frame}
+# #     all_bundles.append(bundle_dict)
+# #     pose_graph_lc.add_bundle(bundle_dict)
+# #     pose_graph_no_lc.add_bundle(bundle_dict)
+# #     print(f"Bundle {key_frame} added to the pose graph")
+# # #
+# # # result = pose_graph.optimize()
+# # # pose_graph.save("/Users/mac/67604-SLAM-video-navigation/final_project/sift_p_graph")
