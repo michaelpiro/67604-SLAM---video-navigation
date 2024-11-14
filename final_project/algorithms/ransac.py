@@ -6,6 +6,8 @@ from final_project.backend.GTSam.gtsam_utils import get_inverse
 from final_project.utils import rodriguez_to_mat
 from final_project.Inputs import read_cameras
 
+SUCCESS_PROBABILITY = 0.9999999999
+
 K, M1, M2 = read_cameras()
 P, Q = K @ M1, K @ M2
 
@@ -58,7 +60,7 @@ def calc_ransac_iteration(inliers_percent):
     """
     calculate the number of iterations needed to solve the RANSAC problem
     """
-    suc_prob = 0.9999999999
+    suc_prob = SUCCESS_PROBABILITY
     outliers_prob = 1 - (inliers_percent / 100) + 0.0000000001
     min_set_size = 4
     ransac_iterations = int(np.log(1 - suc_prob) / np.log(1 - np.power(1 - outliers_prob, min_set_size))) + 1

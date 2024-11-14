@@ -11,7 +11,7 @@ from final_project import arguments
 from final_project.analysis import run_analysis, plot_loc_deg_uncertainties, calculate_camera_locations, \
     calculate_bundles_global_transformation
 from final_project.backend.GTSam import bundle
-from final_project.backend.GTSam.gtsam_utils import calculate_all_pnp_rel_transformation
+from final_project.backend.GTSam.gtsam_utils import calculate_all_pnp_rel_transformation, save
 from final_project.backend.GTSam.pose_graph import PoseGraph
 from final_project.backend.database.tracking_database import TrackingDB
 from final_project.backend.database.database import *
@@ -24,31 +24,17 @@ ALL_BUNDLES_PKL = "all_bundles.pkl"
 DEFAULT_DB_NAME = "new_db"
 
 
-# def prepare_files_for_analysis(all_bundles,database):
-#     relative_pnp_transformations = calculate_all_pnp_rel_transformation(database)
-#     np.save(arguments.RELATIVE_PNP_T_PATH, relative_pnp_transformations)
-#     global_pnp = []
-#     for i in range(relative_pnp_transformations):
-#         if i == 0:
-#             global_pnp.append(relative_pnp_transformations[i])
-#         else:
-#             global_mat = relative_pnp_transformations[i] @ np.vstack((global_pnp[-1][:3,:], np.array([0, 0, 0, 1])))
-#             global_pnp.append(global_mat[:3,:])
-#     np.save(arguments.PNP_GLOBAL_T_PATH, global_pnp)
-#     global_bundle_transformation = calculate_bundles_global_transformation(all_bundles)
-#     np.save(arguments.BUNDLES_GLOBAL_T_PATH, global_bundle_transformation)
-
-def run_project(path_to_db = None, path_to_bundles = None, path_to_pg = None, path_to_pg_lc = None):
+def run_project(db_path=None, bundles_path=None, pg_path=None, pg_lc_path=None):
     # load or create the database
-    if path_to_db:
+    if db_path:
         db = TrackingDB()
-        db.load(path_to_db)
+        db.load(db_path)
     else:
         db = run(DEFAULT_DB_NAME)
 
     # load or create the bundles
-    if path_to_bundles:
-        all_bundles = load(path_to_bundles)
+    if bundles_path:
+        all_bundles = load(bundles_path)
     else:
         all_bundles = []
         # get keyframes to create bundles
@@ -57,7 +43,6 @@ def run_project(path_to_db = None, path_to_bundles = None, path_to_pg = None, pa
 
         # create all the bundles
         for key_frame in key_frames:
-
             # create a single bundle
             graph, initial, cameras_dict, frames_dict = bundle.create_single_bundle(key_frame[0], key_frame[1], db)
 
@@ -77,8 +62,8 @@ def run_project(path_to_db = None, path_to_bundles = None, path_to_pg = None, pa
         save(all_bundles, ALL_BUNDLES_PKL)
 
     # load or create PoseGraph object
-    if path_to_pg_lc:
-        pg_lc = load(path_to_pg)
+    if pg_lc_path:
+        pg_lc = load(pg_path)
     else:
         # create PoseGraph object
         pg_lc = PoseGraph()
@@ -99,10 +84,9 @@ def run_project(path_to_db = None, path_to_bundles = None, path_to_pg = None, pa
         # save the pose graph with loop closure
         pg_lc.save(PG_LC_PKL)
 
-
     # load the pose graph before loop closure
-    if path_to_pg:
-        pg = load(path_to_pg)
+    if pg_path:
+        pg = load(pg_path)
     else:
         pg = load(PG_BEFORE_L_C_PKL)
 
@@ -110,15 +94,13 @@ def run_project(path_to_db = None, path_to_bundles = None, path_to_pg = None, pa
     run_analysis(db, all_bundles, pg_lc, pg)
 
 
-
-
 if __name__ == '__main__':
     path_to_db = "SIFT_DB"
     # path_to_db = None
-    # path_to_bundles = 'all_bundles.pkl'
+    path_to_bundles = 'all_bundles.pkl'
     # path_to_pg = 'pg_before_l_c'
     # path_to_pg_lc = 'pg_lc'
-    path_to_bundles = None
+    # path_to_bundles = None
     path_to_pg = None
     path_to_pg_lc = None
 
